@@ -4,7 +4,7 @@ from pathlib import Path
 from itertools import groupby
 from typing import List, Iterator, Tuple
 import logging
-from . import config
+from settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -73,23 +73,23 @@ def run_extraction():
     Orquestra todo o processo de descompactação.
     """
 
-    if not config.COMPRESSED_DIR.is_dir():
+    compressed_dir = settings.compressed_dir
+    extracted_dir = settings.extracted_dir
+
+    if not compressed_dir.is_dir():
         logging.error(
-            f"❌ Erro: O diretório de origem '{config.COMPRESSED_DIR}' não foi encontrado."
+            f"❌ Erro: O diretório de origem '{compressed_dir}' não foi encontrado."
         )
         return
 
     logging.info(
         f"Iniciando processo de descompactação...\n"
-        f"Origem: '{config.COMPRESSED_DIR}'\n"
-        f"Destino: '{config.EXTRACTED_DIR}'\n"
+        f"Origem: '{compressed_dir}'\n"
+        f"Destino: '{extracted_dir}'\n"
     )
 
-    # 1. Efeito Colateral: Garante que o diretório de saída principal existe.
-    create_directory_if_not_exists(config.EXTRACTED_DIR)
-
     # 2. Leitura do sistema de arquivos para obter a lista de arquivos.
-    zip_files = list(config.COMPRESSED_DIR.glob("*.zip"))
+    zip_files = list(compressed_dir.glob("*.zip"))
 
     if not zip_files:
         logging.error("🟡 Nenhum arquivo .zip encontrado no diretório de origem.")
@@ -101,7 +101,7 @@ def run_extraction():
     # 4. Itera sobre os grupos e aplica os efeitos colaterais (criar dir e extrair).
     for base_name, files_iterator in file_groups:
         target_subdir_name = base_name.lower()
-        target_path = config.EXTRACTED_DIR / target_subdir_name
+        target_path = extracted_dir / target_subdir_name
 
         logging.info(f"\n📂 Processando grupo: '{base_name}'")
 
@@ -116,4 +116,4 @@ def run_extraction():
 
 
 if __name__ == "__main__":
-    run_extraction(config.COMPRESSED_DIR, config.EXTRACTED_DIR)
+    run_extraction(settings.compressed_dir, settings.extracted_dir)

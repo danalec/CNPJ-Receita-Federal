@@ -1,23 +1,107 @@
 import pandas as pd
 import logging
+import io
 from sqlalchemy import create_engine
-
-# Importa os modelos e o arquivo de configuração GERAL
-from . import models
-from . import config as base_config
+from models import Base
+from settings import settings
 
 logger = logging.getLogger(__name__)
 
 
+def fast_load_chunk(engine, df, table_name):
+    """
+    Função de Carga Ultra-Rápida (PostgreSQL COPY)
+    Carrega um DataFrame para o PostgreSQL usando o comando COPY.
+    É de 10x a 50x mais rápido que o to_sql padrão.
+    """
+
+    # Converte o DataFrame para CSV em memória (buffer)
+    output = io.StringIO()
+
+    # Prepara o CSV: sem index, sem header, separador ';', e NULL representado por string vazia
+    df.to_csv(
+        output,
+        sep=";",
+        header=False,
+        index=False,
+        na_rep="",  # PostgreSQL entende string vazia como NULL se configurado abaixo
+        quotechar='"',
+        doublequote=True,
+    )
+
+    # Volta o ponteiro para o início do arquivo em memória
+    output.seek(0)
+
+    # Obtém uma conexão crua (raw) do driver psycopg2
+    connection = engine.raw_connection()
+    cursor = connection.cursor()
+
+    try:
+        # Executa o comando COPY EXPERT
+        # COPY table FROM STDIN WITH
+        # (FORMAT CSV, DELIMITER ';', NULL '', QUOTE '"')
+        sql = f"""
+            COPY {table_name} 
+            FROM STDIN 
+            WITH (
+                FORMAT CSV, 
+                DELIMITER ';', 
+                NULL '', 
+                QUOTE '"', 
+                HEADER FALSE
+            )
+        """
+        cursor.copy_expert(sql, output)
+        connection.commit()
+    except Exception as e:
+        connection.rollback()
+        logger.error(f"Erro no COPY para tabela {table_name}: {e}")
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+# --- Hooks de Limpeza ---
+
+
 def clean_empresas_chunk(chunk_df):
-    """Aplica limpezas no chunk de empresas USANDO OS NOMES FINAIS das colunas."""
-    capital_social_str = chunk_df["capital_social"].str.replace(",", ".", regex=False)
-    chunk_df["capital_social"] = pd.to_numeric(capital_social_str, errors="coerce")
+    """Aplica limpezas no chunk de empresas."""
+    if "capital_social" in chunk_df.columns:
+        capital_social_str = (
+            chunk_df["capital_social"].astype(str).str.replace(",", ".", regex=False)
+        )
+        chunk_df["capital_social"] = pd.to_numeric(capital_social_str, errors="coerce")
     return chunk_df
 
 
+def clean_estabelecimentos_chunk(chunk_df):
+    """
+    Prepara o chunk de estabelecimentos para o PostgreSQL.
+    Transforma a lista de CNAEs secundários de '1,2,3' para '{1,2,3}' (formato de array do Postgres).
+    """
+    col_name = "cnae_fiscal_secundaria"
+
+    if col_name in chunk_df.columns:
+        # Preenche nulos com string vazia temporariamente para não quebrar a concatenação
+        chunk_df[col_name] = chunk_df[col_name].fillna("")
+
+        # Aplica a formatação de array do Postgres: "{valor,valor}"
+        # Apenas onde tem valor (não é vazio)
+        mask = chunk_df[col_name] != ""
+
+        # Adiciona as chaves {} ao redor do texto existente
+        chunk_df.loc[mask, col_name] = "{" + chunk_df.loc[mask, col_name] + "}"
+
+        # Onde era vazio, voltamos para None (NULL no banco) para não ficar "{}"
+        chunk_df.loc[~mask, col_name] = None
+
+    return chunk_df
+
+
+# Estruturação dos dados que serão migrados
+
 ETL_CONFIG = {
-    # Tabelas de Domínio
     "paises": {
         "table_name": "paises",
         "column_names": ["codigo", "nome"],
@@ -38,7 +122,6 @@ ETL_CONFIG = {
         "table_name": "cnaes",
         "column_names": ["codigo", "nome"],
     },
-    # --- Tabelas de Dados Principais ---
     "empresas": {
         "table_name": "empresas",
         "column_names": [
@@ -109,6 +192,8 @@ ETL_CONFIG = {
             "data_inicio_atividade",
             "data_situacao_especial",
         ],
+        # Adicionado o hook de limpeza para o array de CNAEs
+        "custom_clean_func": clean_estabelecimentos_chunk,
     },
     "socios": {
         "table_name": "socios",
@@ -157,40 +242,35 @@ ETL_CONFIG = {
     },
 }
 
-
-# --- Processador Genérico de Arquivos ---
+# --- Processador ---
 
 
 def process_and_load_file(engine, config_name):
-    """
-    Função genérica que lê, transforma e carrega um arquivo CSV sem cabeçalho,
-    atribuindo os nomes das colunas diretamente.
-    """
     try:
         etl_config = ETL_CONFIG[config_name]
     except KeyError:
-        logger.error(f"Configuração para '{config_name}' não encontrada no ETL_CONFIG.")
+        logger.error(f"Configuração para '{config_name}' não encontrada.")
         return
 
     table_name = etl_config["table_name"]
-    file_path = base_config.EXTRACTED_DIR / config_name / f"{config_name}.csv"
+    file_path = settings.extracted_dir / config_name / f"{config_name}.csv"
 
     if not file_path.exists():
         logger.warning(f"Arquivo '{file_path}' não encontrado. Pulando.")
         return
 
-    logger.info(f"--- Iniciando processamento para a tabela '{table_name}' ---")
+    logger.info(f"--- Processando tabela '{table_name}' (Modo: PostgreSQL COPY) ---")
 
     reader = pd.read_csv(
         file_path,
         delimiter=";",
-        encoding=base_config.FILE_ENCODING,
+        encoding=settings.file_encoding,
         header=None,
         names=etl_config["column_names"],
         dtype=etl_config.get("dtype_map", None),
         parse_dates=etl_config.get("date_columns", None),
         infer_datetime_format=True,
-        chunksize=base_config.CHUNKSIZE,
+        chunksize=settings.chunck_size,
     )
 
     total_rows = 0
@@ -198,30 +278,31 @@ def process_and_load_file(engine, config_name):
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
 
-        chunk.to_sql(table_name, engine, if_exists="append", index=False)
+        # AQUI ESTÁ A MÁGICA: Substituímos to_sql por fast_load_chunk
+        fast_load_chunk(engine, chunk, table_name)
 
         total_rows += len(chunk)
-        logger.info(
-            f"  ... Chunk {i + 1} para '{table_name}' processado. "
-            f"Total de {total_rows} linhas carregadas."
-        )
+        logger.info(f"  ... Chunk {i + 1} processado. Total: {total_rows} linhas.")
 
-    logger.info(f"--- Carga para a tabela '{table_name}' finalizada com sucesso! ---")
+    logger.info(f"--- Tabela '{table_name}' finalizada! ---")
+
+
+# --- Orquestrador ---
 
 
 def run_loader():
-    """
-    Orquestra todo o processo de carga no banco de dados.
-    """
-    logger.info("Iniciando a carga de dados para o banco...")
+    logger.info("Iniciando carga para PostgreSQL...")
 
-    engine = create_engine(base_config.DATABASE_URI)
+    engine = create_engine(settings.database_uri)
 
-    logger.info("Recriando todas as tabelas do banco de dados...")
-    models.Base.metadata.drop_all(engine)
-    models.Base.metadata.create_all(engine)
-    logger.info("Tabelas recriadas com sucesso.")
+    # A parte de dropar/criar tabelas é segura com SQLAlchemy e Postgres
+    # OBS: Dependendo do tamanho do banco, usar drop_all pode ser perigoso em produção.
+    # Para carga inicial, está ótimo.
+    logger.info("Recriando schema...")
+    Base.metadata.drop_all(engine)
+    Base.metadata.create_all(engine)
 
+    # Ordem de processamento
     processing_order = [
         "paises",
         "municipios",
@@ -237,4 +318,11 @@ def run_loader():
     for table_config_name in processing_order:
         process_and_load_file(engine, table_config_name)
 
-    logger.info("Carga de dados para o banco finalizada.")
+    logger.info("Carga finalizada.")
+
+
+if __name__ == "__main__":
+    from settings import setup_logging
+
+    setup_logging()
+    run_loader()

@@ -2,7 +2,7 @@ import logging
 import shutil
 from pathlib import Path
 from typing import List
-from . import config
+from settings import settings
 
 
 logger = logging.getLogger(__name__)
@@ -71,12 +71,14 @@ def run_consolidation():
     """
     logger.info("Iniciando processo de consolidação de dados...")
 
-    if not config.EXTRACTED_DIR.exists():
-        msg = f"Diretório de extração não encontrado: {config.EXTRACTED_DIR}"
+    extracted_dir = settings.extracted_dir
+
+    if not extracted_dir.exists():
+        msg = f"Diretório de extração não encontrado: {extracted_dir}"
         logger.error(msg)
         raise FileNotFoundError(msg)
 
-    subdirectories = get_subdirectories(config.EXTRACTED_DIR)
+    subdirectories = get_subdirectories(extracted_dir)
 
     for subdir in subdirectories:
         concatenate_files_in_directory(subdir)

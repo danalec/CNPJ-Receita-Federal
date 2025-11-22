@@ -1,6 +1,5 @@
 import enum
 from sqlalchemy import (
-    create_engine,
     Column,
     Integer,
     String,
@@ -9,6 +8,7 @@ from sqlalchemy import (
     Enum,
     Text,
     ForeignKey,
+    ARRAY,
 )
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -134,7 +134,7 @@ class Estabelecimento(Base):
     pais_codigo = Column(Integer, ForeignKey("paises.codigo"))
     data_inicio_atividade = Column(Date)
     cnae_fiscal_principal_codigo = Column(Integer, ForeignKey("cnaes.codigo"))
-    cnae_fiscal_secundaria = Column(Text)  # Armazena códigos separados por vírgula
+    cnae_fiscal_secundaria = Column(ARRAY(String))
     tipo_logradouro = Column(String(50))
     logradouro = Column(String(255))
     numero = Column(String(20))
@@ -213,14 +213,3 @@ class Socio(Base):
     qualificacao_representante_legal = relationship(
         "QualificacaoSocio", foreign_keys=[qualificacao_representante_legal_codigo]
     )
-
-
-if __name__ == "__main__":
-    # Cria uma instância do motor do banco de dados 
-    # (neste caso, SQLite em memória)
-    engine = create_engine("sqlite:///:memory:")
-
-    # Cria todas as tabelas no banco de dados
-    print("Criando tabelas no banco de dados...")
-    Base.metadata.create_all(engine)
-    print("Tabelas criadas com sucesso!")
