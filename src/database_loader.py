@@ -1,47 +1,46 @@
 import pandas as pd
 import logging
 import io
-from sqlalchemy import create_engine
-from models import Base
-from settings import settings
+from sqlalchemy import create_engine, text
+from .models import Base
+from .settings import settings
 
 logger = logging.getLogger(__name__)
 
 
 def fast_load_chunk(engine, df, table_name):
     """
-    Função de Carga Ultra-Rápida (PostgreSQL COPY)
-    Carrega um DataFrame para o PostgreSQL usando o comando COPY.
-    É de 10x a 50x mais rápido que o to_sql padrão.
+    Função de Carga Ultra-Rápida (PostgreSQL COPY) com Mapeamento Explícito.
     """
 
-    # Converte o DataFrame para CSV em memória (buffer)
+    # 1. Converte o DataFrame para CSV em memória
     output = io.StringIO()
 
-    # Prepara o CSV: sem index, sem header, separador ';', e NULL representado por string vazia
     df.to_csv(
         output,
         sep=";",
         header=False,
         index=False,
-        na_rep="",  # PostgreSQL entende string vazia como NULL se configurado abaixo
+        na_rep="",
         quotechar='"',
         doublequote=True,
     )
 
-    # Volta o ponteiro para o início do arquivo em memória
     output.seek(0)
 
-    # Obtém uma conexão crua (raw) do driver psycopg2
+    # 2. Pega os nomes das colunas do DataFrame para garantir o mapeamento correto
+    # Isso resolve o problema de colunas fora de ordem entre Model e CSV
+    columns = df.columns.tolist()
+    columns_str = ",".join([f'"{col}"' for col in columns])
+
     connection = engine.raw_connection()
     cursor = connection.cursor()
 
     try:
-        # Executa o comando COPY EXPERT
-        # COPY table FROM STDIN WITH
-        # (FORMAT CSV, DELIMITER ';', NULL '', QUOTE '"')
+        # 3. Comando COPY com colunas EXPLICITAS
+        # COPY tabela (col1, col2, col3...) FROM STDIN ...
         sql = f"""
-            COPY {table_name} 
+            COPY {table_name} ({columns_str})
             FROM STDIN 
             WITH (
                 FORMAT CSV, 
@@ -65,6 +64,14 @@ def fast_load_chunk(engine, df, table_name):
 # --- Hooks de Limpeza ---
 
 
+def sanitize_dates(df, date_columns):
+    """Converte colunas de data, transformando erros (ex: '0') em NaT/NULL."""
+    for col in date_columns:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce")
+    return df
+
+
 def clean_empresas_chunk(chunk_df):
     """Aplica limpezas no chunk de empresas."""
     if "capital_social" in chunk_df.columns:
@@ -77,26 +84,43 @@ def clean_empresas_chunk(chunk_df):
 
 def clean_estabelecimentos_chunk(chunk_df):
     """
-    Prepara o chunk de estabelecimentos para o PostgreSQL.
-    Transforma a lista de CNAEs secundários de '1,2,3' para '{1,2,3}' (formato de array do Postgres).
+    Prepara o chunk de estabelecimentos:
+    1. Limpa datas (converte '0' para NULL)
+    2. Formata array de CNAEs
     """
+    # 1. Limpeza de Datas
+    date_cols = [
+        "data_situacao_cadastral",
+        "data_inicio_atividade",
+        "data_situacao_especial",
+    ]
+    chunk_df = sanitize_dates(chunk_df, date_cols)
+
+    # 2. Limpeza de Array CNAE
     col_name = "cnae_fiscal_secundaria"
-
     if col_name in chunk_df.columns:
-        # Preenche nulos com string vazia temporariamente para não quebrar a concatenação
         chunk_df[col_name] = chunk_df[col_name].fillna("")
-
-        # Aplica a formatação de array do Postgres: "{valor,valor}"
-        # Apenas onde tem valor (não é vazio)
         mask = chunk_df[col_name] != ""
-
-        # Adiciona as chaves {} ao redor do texto existente
+        # Adiciona chaves {} para formato array do Postgres
         chunk_df.loc[mask, col_name] = "{" + chunk_df.loc[mask, col_name] + "}"
-
-        # Onde era vazio, voltamos para None (NULL no banco) para não ficar "{}"
         chunk_df.loc[~mask, col_name] = None
 
     return chunk_df
+
+
+def clean_socios_chunk(chunk_df):
+    date_cols = ["data_entrada_sociedade"]
+    return sanitize_dates(chunk_df, date_cols)
+
+
+def clean_simples_chunk(chunk_df):
+    date_cols = [
+        "data_opcao_pelo_simples",
+        "data_exclusao_do_simples",
+        "data_opcao_pelo_mei",
+        "data_exclusao_do_mei",
+    ]
+    return sanitize_dates(chunk_df, date_cols)
 
 
 # Estruturação dos dados que serão migrados
@@ -185,14 +209,17 @@ ETL_CONFIG = {
             "cnae_fiscal_principal_codigo": pd.Int64Dtype(),
             "cep": str,
             "uf": str,
+            "pais_codigo": pd.Int64Dtype(),
             "municipio_codigo": pd.Int64Dtype(),
+            "ddd_1": str,
+            "telefone_1": str,
+            "ddd_2": str,
+            "telefone_2": str,
+            "ddd_fax": str,
+            "fax": str,
+            "correio_eletronico": str,
+            "situacao_especial": str,
         },
-        "date_columns": [
-            "data_situacao_cadastral",
-            "data_inicio_atividade",
-            "data_situacao_especial",
-        ],
-        # Adicionado o hook de limpeza para o array de CNAEs
         "custom_clean_func": clean_estabelecimentos_chunk,
     },
     "socios": {
@@ -218,8 +245,9 @@ ETL_CONFIG = {
             "representante_legal_cpf": str,
             "qualificacao_representante_legal_codigo": pd.Int64Dtype(),
             "faixa_etaria": pd.Int64Dtype(),
+            "pais_codigo": pd.Int64Dtype(),
         },
-        "date_columns": ["data_entrada_sociedade"],
+        "custom_clean_func": clean_socios_chunk,
     },
     "simples": {
         "table_name": "simples",
@@ -233,14 +261,10 @@ ETL_CONFIG = {
             "data_exclusao_do_mei",
         ],
         "dtype_map": {"cnpj_basico": str},
-        "date_columns": [
-            "data_opcao_pelo_simples",
-            "data_exclusao_do_simples",
-            "data_opcao_pelo_mei",
-            "data_exclusao_do_mei",
-        ],
+        "custom_clean_func": clean_simples_chunk,
     },
 }
+
 
 # --- Processador ---
 
@@ -268,8 +292,6 @@ def process_and_load_file(engine, config_name):
         header=None,
         names=etl_config["column_names"],
         dtype=etl_config.get("dtype_map", None),
-        parse_dates=etl_config.get("date_columns", None),
-        infer_datetime_format=True,
         chunksize=settings.chunck_size,
     )
 
@@ -278,7 +300,6 @@ def process_and_load_file(engine, config_name):
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
 
-        # AQUI ESTÁ A MÁGICA: Substituímos to_sql por fast_load_chunk
         fast_load_chunk(engine, chunk, table_name)
 
         total_rows += len(chunk)
@@ -295,14 +316,18 @@ def run_loader():
 
     engine = create_engine(settings.database_uri)
 
-    # A parte de dropar/criar tabelas é segura com SQLAlchemy e Postgres
-    # OBS: Dependendo do tamanho do banco, usar drop_all pode ser perigoso em produção.
-    # Para carga inicial, está ótimo.
     logger.info("Recriando schema...")
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
 
-    # Ordem de processamento
+    if settings.set_unlogged_before_copy:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE empresas SET UNLOGGED;"))
+            conn.execute(text("ALTER TABLE estabelecimentos SET UNLOGGED;"))
+            conn.execute(text("ALTER TABLE socios SET UNLOGGED;"))
+            conn.execute(text("ALTER TABLE simples SET UNLOGGED;"))
+            conn.commit()
+
     processing_order = [
         "paises",
         "municipios",
@@ -320,9 +345,18 @@ def run_loader():
 
     logger.info("Carga finalizada.")
 
+    if settings.set_unlogged_before_copy:
+        with engine.connect() as conn:
+            logger.info("Tornando tabelas persistentes (LOGGED) novamente...")
+            conn.execute(text("ALTER TABLE empresas SET LOGGED;"))
+            conn.execute(text("ALTER TABLE estabelecimentos SET LOGGED;"))
+            conn.execute(text("ALTER TABLE socios SET LOGGED;"))
+            conn.execute(text("ALTER TABLE simples SET LOGGED;"))
+            conn.commit()
+
 
 if __name__ == "__main__":
-    from settings import setup_logging
+    from .config import setup_logging
 
     setup_logging()
     run_loader()

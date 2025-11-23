@@ -4,7 +4,7 @@ from pathlib import Path
 from itertools import groupby
 from typing import List, Iterator, Tuple
 import logging
-from settings import settings
+from .settings import settings
 
 logger = logging.getLogger(__name__)
 

@@ -13,16 +13,59 @@ class Settings(BaseSettings):
     # Sobe 2 níveis para chegar na raiz do projeto (source/config.py)
     project_root: Path = Path(__file__).resolve().parents[1]
 
+    # URL Base da Receita (sem a data)
+    rfb_base_url: str = (
+        "https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/"
+    )
+
+    # Esta variável será preenchida dinamicamente pelo script de update
+    # Default vazio ou uma data específica se for rodar manual
+    target_date: str = ""
+
     postgres_user: str
     postgres_password: str
     postgres_host: str
     postgres_port: int
     postgres_database: str
 
+    # --- Configurações de Download ---
+
+    # Número de downloads simultâneos (não exagere para não tomar block)
+    max_workers: int = 4
+    # Tamanho do pedaço lido na memória (8KB)
+    download_chunk_size: int = 8192
+
+    """
+    Otização que torna as tabelas unlogged
+    Isso desativa o log de transação (WAL) para estas tabelas.
+    A escrita fica muito mais rápida.
+    """
+
+    set_unlogged_before_copy: bool = True
+
+    """
+    Se quiser segurança após a carga, volte para LOGGED. 
+    Mas demora um pouco pois ele vai escrever o log agora.
+    Para dados analíticos, pode deixar UNLOGGED se tiver backup do CSV.
+    """
+
+    set_logged_after_copy: bool = False
+
     # --- ETL ---
     file_encoding: str = "latin1"
     chunck_size: int = 200_000
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+
+    @computed_field
+    def download_url(self) -> str:
+        """Monta a URL completa baseada na data alvo."""
+        if not self.target_date:
+            return ""
+        return f"{self.rfb_base_url}{self.target_date}/"
+
+    @computed_field
+    def state_file(self) -> Path:
+        return self.data_dir / "last_version_processed.txt"
 
     @computed_field
     def data_dir(self) -> Path:
