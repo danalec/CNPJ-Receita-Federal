@@ -18,7 +18,7 @@ python -m src.modulo
 
 ## 1. Verificação Automática
 
-Checa o site da Receita Federal para identificar se há uma nova versão dos dados disponível comparada à versão local. A data de processamento da ultima versão disponível fica em `data/last_processed_version.txt`
+Checa o site da Receita Federal para identificar se há uma nova versão dos dados disponível comparada à versão local. A data de processamento da última versão disponível fica em `data/last_version_processed.txt`
 
 Você pode adicionar o `main.py` ao seu `crontab ` ele checa se há atualizações, se tiver ele inicia o pipeline de processamento.
 
@@ -40,7 +40,7 @@ Descompacta arquivos baixados que por padrão são dívidos em vários arquivos 
 
 Agrupo os `CSVs` descompactados em único arquivo, único por categoria, removendo a necessidade de lidar com múltiplos arquivos durante a carga.
 
-**Módulo responsável: `consolidate.py`**
+**Módulo responsável: `consolidate_csv.py`**
 
 ## 5. Carga para o Banco de dados
 
@@ -76,7 +76,7 @@ poetry shell
 
 ### 3. Configuração
 
-Crie um arquivo `.env` na raiz do projeto, existe um exemplo `env.example` que você também pode renomear. Em `settings.py ` há mais configurações opcionais.
+Crie um arquivo `.env` na raiz do projeto, existe um exemplo `.env.example` que você também pode renomear. Em `settings.py` há mais configurações opcionais.
 
 ```text
 # URL RFB
@@ -90,7 +90,7 @@ POSTGRES_PORT=5432
 POSTGRES_DATABASE=Dados_RFB
 
 # File configuration
-FILE_ENCONDING=latin1
+FILE_ENCODING=latin1
 CHUNK_SIZE=200_000
 
 # Logging configuration
