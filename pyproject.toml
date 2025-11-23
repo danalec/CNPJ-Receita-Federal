@@ -16,8 +16,7 @@ dependencies = [
     "beautifulsoup4 (>=4.12.3,<5.0.0)"
 ]
 
-[tool.poetry]
-packages = [{include = "cnpj_receita_federal", from = "src"}]
+# Packaging configuration removed; this project is app-oriented and not distributing a package.
 
 
 [build-system]
