@@ -59,6 +59,81 @@ def fast_load_chunk(conn, df, table_name):
         raise
 
 
+DOMAIN_CACHE = {}
+
+
+def _get_domain_set(conn, table, column):
+    key = (table, column)
+    if key in DOMAIN_CACHE:
+        return DOMAIN_CACHE[key]
+    with conn.cursor() as cursor:
+        cursor.execute(f"SELECT DISTINCT {column} FROM {table}")
+        s = set(r[0] for r in cursor.fetchall() if r[0] is not None)
+    DOMAIN_CACHE[key] = s
+    return s
+
+
+UF_SET = {
+    'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RO','RS','RR','SC','SE','SP','TO'
+}
+
+
+def _ensure_domains_loaded(conn, domains):
+    with conn.cursor() as cursor:
+        for tbl in domains:
+            cursor.execute(f"SELECT COUNT(*) FROM {tbl}")
+            cnt = cursor.fetchone()[0]
+            if cnt == 0:
+                raise RuntimeError(f"Tabela de domínio '{tbl}' ainda não carregada. Ajuste a ordem ou remova filtros --only/--exclude.")
+
+
+def _validate_fk_set(df, column, valid_set, label):
+    vals = set(df[column].dropna().unique()) if column in df.columns else set()
+    missing = vals - valid_set
+    if missing:
+        sample = list(missing)[:10]
+        raise ValueError(f"Valores inválidos em '{label}': {sample} (total {len(missing)}). Garanta que a tabela de domínio está carregada e os códigos são válidos.")
+
+
+def validate_chunk(config_name, chunk_df, conn):
+    if config_name == "empresas":
+        _ensure_domains_loaded(conn, ["naturezas_juridicas", "qualificacoes_socios"])
+        nat = _get_domain_set(conn, "naturezas_juridicas", "codigo")
+        qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
+        if "natureza_juridica_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "natureza_juridica_codigo", nat, "natureza_juridica_codigo")
+        if "qualificacao_responsavel" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "qualificacao_responsavel", qual, "qualificacao_responsavel")
+    elif config_name == "estabelecimentos":
+        _ensure_domains_loaded(conn, ["paises", "municipios", "cnaes", "empresas"])
+        paises = _get_domain_set(conn, "paises", "codigo")
+        municipios = _get_domain_set(conn, "municipios", "codigo")
+        cnaes = _get_domain_set(conn, "cnaes", "codigo")
+        if "pais_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo")
+        if "municipio_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "municipio_codigo", municipios, "municipio_codigo")
+        if "cnae_fiscal_principal_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "cnae_fiscal_principal_codigo", cnaes, "cnae_fiscal_principal_codigo")
+        if "uf" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "uf", UF_SET, "uf")
+        if "cnae_fiscal_secundaria" in chunk_df.columns:
+            s = chunk_df["cnae_fiscal_secundaria"].dropna().astype(str)
+            bad = ~((s.str.startswith("{") & s.str.endswith("}")) | (s == ""))
+            if bad.any():
+                raise ValueError("Campo cnae_fiscal_secundaria com formato inválido em algumas linhas. Esperado texto de array PostgreSQL: '{...}'.")
+    elif config_name == "socios":
+        _ensure_domains_loaded(conn, ["paises", "qualificacoes_socios", "empresas"])
+        paises = _get_domain_set(conn, "paises", "codigo")
+        qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
+        if "pais_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo")
+        if "qualificacao_socio_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "qualificacao_socio_codigo", qual, "qualificacao_socio_codigo")
+        if "qualificacao_representante_legal_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "qualificacao_representante_legal_codigo", qual, "qualificacao_representante_legal_codigo")
+
+
 def sanitize_dates(df, date_columns):
     for col in date_columns:
         if col in df.columns:
@@ -277,6 +352,7 @@ def process_and_load_file(conn, config_name):
     for i, chunk in enumerate(reader):
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
+        validate_chunk(config_name, chunk, conn)
 
         # Passa a conexão direta
         fast_load_chunk(conn, chunk, table_name)
