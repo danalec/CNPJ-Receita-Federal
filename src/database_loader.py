@@ -4,6 +4,7 @@ import io
 import psycopg2
 from pathlib import Path
 from .settings import settings
+from .validation import validate as schema_validate
 
 logger = logging.getLogger(__name__)
 
@@ -341,7 +342,7 @@ def process_and_load_file(conn, config_name):
     reader = pd.read_csv(
         file_path,
         delimiter=";",
-        encoding=settings.file_encoding,
+        encoding=_detect_encoding(file_path, settings.file_encoding),
         header=None,
         names=etl_config["column_names"],
         dtype=etl_config.get("dtype_map", None),
@@ -352,6 +353,7 @@ def process_and_load_file(conn, config_name):
     for i, chunk in enumerate(reader):
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
+        chunk = schema_validate(config_name, chunk)
         validate_chunk(config_name, chunk, conn)
 
         # Passa a conexão direta
@@ -546,3 +548,12 @@ if __name__ == "__main__":
 
     setup_logging()
     run_loader()
+def _detect_encoding(file_path: Path, default: str) -> str:
+    try:
+        from charset_normalizer import from_path
+        res = from_path(str(file_path)).best()
+        if res and res.encoding:
+            return res.encoding
+    except Exception:
+        return default
+    return default
