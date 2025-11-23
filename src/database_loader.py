@@ -1,17 +1,23 @@
 import pandas as pd
 import logging
 import io
+import psycopg2
 from pathlib import Path
-from sqlalchemy import create_engine, text
 from .settings import settings
 
 logger = logging.getLogger(__name__)
 
-# --- Funções de Carga e Limpeza (Mantidas iguais, resumidas aqui) ---
+# --- Funções de Carga e Limpeza ---
 
 
-def fast_load_chunk(engine, df, table_name):
+def fast_load_chunk(conn, df, table_name):
+    """
+    Função de Carga Ultra-Rápida (PostgreSQL COPY).
+    Recebe a conexão direta do psycopg2 (conn).
+    """
     output = io.StringIO()
+
+    # Prepara o CSV em memória
     df.to_csv(
         output,
         sep=";",
@@ -26,23 +32,31 @@ def fast_load_chunk(engine, df, table_name):
     columns = df.columns.tolist()
     columns_str = ",".join([f'"{col}"' for col in columns])
 
-    connection = engine.raw_connection()
-    cursor = connection.cursor()
-
+    # Usa um cursor para executar o COPY
     try:
-        sql = (
-            f"COPY {table_name} ({columns_str}) FROM STDIN WITH"
-            "(FORMAT CSV, DELIMITER ';', NULL '', QUOTE '\"', HEADER FALSE)"
-        )
-        cursor.copy_expert(sql, output)
-        connection.commit()
+        with conn.cursor() as cursor:
+            sql = f"""
+                COPY {table_name} ({columns_str}) 
+                FROM STDIN 
+                WITH (
+                    FORMAT CSV, 
+                    DELIMITER ';', 
+                    NULL '', 
+                    QUOTE '"', 
+                    HEADER FALSE
+                )
+            """
+            cursor.copy_expert(sql, output)
+
+        # O commit é feito no nível superior (loop de processamento)
+        # para evitar commit a cada chunk pequeno se desejar,
+        # mas aqui faremos commit por chunk para liberar memória do PG.
+        conn.commit()
+
     except Exception as e:
-        connection.rollback()
+        conn.rollback()
         logger.error(f"Erro no COPY para tabela {table_name}: {e}")
         raise
-    finally:
-        cursor.close()
-        connection.close()
 
 
 def sanitize_dates(df, date_columns):
@@ -93,18 +107,9 @@ def clean_simples_chunk(chunk_df):
     )
 
 
-# --- Configuração ETL ---
-
 ETL_CONFIG = {
-    # As chaves aqui devem bater com o nome da PASTA/ARQUIVO CSV extraído
-    "paises": {
-        "table_name": "paises",
-        "column_names": ["codigo", "nome"],
-    },
-    "municipios": {
-        "table_name": "municipios",
-        "column_names": ["codigo", "nome"],
-    },
+    "paises": {"table_name": "paises", "column_names": ["codigo", "nome"]},
+    "municipios": {"table_name": "municipios", "column_names": ["codigo", "nome"]},
     "qualificacoes": {
         "table_name": "qualificacoes_socios",
         "column_names": ["codigo", "nome"],
@@ -113,10 +118,7 @@ ETL_CONFIG = {
         "table_name": "naturezas_juridicas",
         "column_names": ["codigo", "nome"],
     },
-    "cnaes": {
-        "table_name": "cnaes",
-        "column_names": ["codigo", "nome"],
-    },
+    "cnaes": {"table_name": "cnaes", "column_names": ["codigo", "nome"]},
     "empresas": {
         "table_name": "empresas",
         "column_names": [
@@ -190,6 +192,12 @@ ETL_CONFIG = {
             "fax": str,
             "correio_eletronico": str,
             "situacao_especial": str,
+            "data_situacao_cadastral": str,
+            "data_inicio_atividade": str,
+            "data_situacao_especial": str,
+            "nome_cidade_exterior": str,
+            "numero": str,
+            "complemento": str,
         },
         "custom_clean_func": clean_estabelecimentos_chunk,
     },
@@ -239,7 +247,10 @@ ETL_CONFIG = {
 # --- Processador ---
 
 
-def process_and_load_file(engine, config_name):
+def process_and_load_file(conn, config_name):
+    """
+    Agora recebe a conexão 'conn' em vez de 'engine'.
+    """
     try:
         etl_config = ETL_CONFIG[config_name]
     except KeyError:
@@ -247,9 +258,6 @@ def process_and_load_file(engine, config_name):
         return
 
     table_name = etl_config["table_name"]
-
-    # Aqui assume-se que o arquivo CSV tem o mesmo nome da
-    # chave do config (ex: naturezas/naturezas.csv)
     file_path = settings.extracted_dir / config_name / f"{config_name}.csv"
 
     if not file_path.exists():
@@ -272,7 +280,10 @@ def process_and_load_file(engine, config_name):
     for i, chunk in enumerate(reader):
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
-        fast_load_chunk(engine, chunk, table_name)
+
+        # Passa a conexão direta
+        fast_load_chunk(conn, chunk, table_name)
+
         total_rows += len(chunk)
         logger.info(f"  ... Chunk {i + 1} processado. Total: {total_rows} linhas.")
 
@@ -282,7 +293,10 @@ def process_and_load_file(engine, config_name):
 # --- Executor de SQL ---
 
 
-def execute_sql_file(engine, filename):
+def execute_sql_file(conn, filename):
+    """
+    Lê e executa um arquivo SQL usando cursor do psycopg2.
+    """
     base_path = Path(__file__).parent
     file_path = base_path / filename
 
@@ -294,60 +308,80 @@ def execute_sql_file(engine, filename):
     with open(file_path, "r", encoding="utf-8") as f:
         sql_content = f.read()
 
-    with engine.begin() as conn:
-        conn.execute(text(sql_content))
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql_content)
+        conn.commit()  # Confirma as alterações do DDL
+        logger.info(f"Sucesso ao executar {filename}")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"ERRO ao executar SQL de {filename}: {e}")
+        raise
 
 
 # --- Orquestrador Principal ---
 
 
 def run_loader():
-    logger.info("Iniciando carga para PostgreSQL...")
-    engine = create_engine(settings.database_uri)
+    logger.info("Iniciando carga para PostgreSQL (Driver Nativo)...")
 
-    # Cria as tabelas
-    execute_sql_file(engine, "schema.sql")
+    # Conexão direta via psycopg2
+    try:
+        conn = psycopg2.connect(settings.database_uri)
+    except Exception as e:
+        logger.error(f"Erro ao conectar no banco: {e}")
+        return
 
-    # Aqui são os nomes dos arquivos CSV, que serão processados
-    processing_order = [
-        "paises",
-        "municipios",
-        "qualificacoes",
-        "naturezas",
-        "cnaes",
-        "empresas",
-        "estabelecimentos",
-        "simples",
-        "socios",
-    ]
+    try:
+        # Cria as tabelas
+        execute_sql_file(conn, "schema.sql")
 
-    for config_name in processing_order:
-        process_and_load_file(engine, config_name)
-
-    if settings.set_unlogged_before_copy:
-        logger.info("Tornando tabelas persistentes (LOGGED) novamente...")
-
-        tables = [
-            "empresas",
-            "estabelecimentos",
-            "socios",
-            "simples",
+        processing_order = [
             "paises",
             "municipios",
-            "qualificacoes_socios",
-            "naturezas_juridicas",
+            "qualificacoes",
+            "naturezas",
             "cnaes",
+            "empresas",
+            "estabelecimentos",
+            "simples",
+            "socios",
         ]
 
-        with engine.begin() as conn:
-            for tbl in tables:
-                conn.execute(text(f"ALTER TABLE {tbl} SET LOGGED;"))
+        # Fluxo principal de processamento dos arquivos CSV para SQL
+        for config_name in processing_order:
+            process_and_load_file(conn, config_name)
 
-    # Cria Índices e Chaves Estrangeiras (Pós-Carga para performance)
-    logger.info("Aplicando Constraints e Índices...")
-    execute_sql_file(engine, "constraints.sql")
+        if settings.set_unlogged_before_copy:
+            logger.info("Tornando tabelas persistentes (LOGGED) novamente...")
 
-    logger.info("Carga finalizada com sucesso.")
+            tables = [
+                "empresas",
+                "estabelecimentos",
+                "socios",
+                "simples",
+                "paises",
+                "municipios",
+                "qualificacoes_socios",
+                "naturezas_juridicas",
+                "cnaes",
+            ]
+
+            with conn.cursor() as cursor:
+                for tbl in tables:
+                    cursor.execute(f"ALTER TABLE {tbl} SET LOGGED;")
+            conn.commit()
+
+        logger.info("Aplicando Constraints e Índices...")
+        execute_sql_file(conn, "constraints.sql")
+
+        logger.info("Carga finalizada com sucesso.")
+
+    except Exception as e:
+        logger.error(f"Erro crítico durante o processo: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

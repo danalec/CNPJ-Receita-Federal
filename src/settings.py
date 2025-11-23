@@ -28,22 +28,20 @@ class Settings(BaseSettings):
     postgres_port: int
     postgres_database: str
 
-    # --- Configurações de Download ---
+    """
+    Configurações de Download
+    """
 
     # Número de downloads simultâneos (não exagere para não tomar block)
     max_workers: int = 4
-    # Tamanho do pedaço lido na memória (8KB)
+    # Tamanho do pedaço lido na memória durante download (8KB)
     download_chunk_size: int = 8192
 
     """
-    Otização que torna as tabelas unlogged
-    Isso desativa o log de transação (WAL) para estas tabelas.
+    O script por padrão desativa o log de transação (WAL) 
+    Otização que torna as tabelas unlogged.
     A escrita fica muito mais rápida.
-    """
-
-    set_unlogged_before_copy: bool = True
-
-    """
+    
     Se quiser segurança após a carga, volte para LOGGED. 
     Mas demora um pouco pois ele vai escrever o log agora.
     Para dados analíticos, pode deixar UNLOGGED se tiver backup do CSV.
@@ -51,9 +49,17 @@ class Settings(BaseSettings):
 
     set_logged_after_copy: bool = False
 
-    # --- ETL ---
+    """
+    Configurações da migração de dados, caso tenha mais memória
+    você pode aumentar, o padrão é 200_000 o que da um consumo de
+    200-500 megas de memória. Essa variação ocorre por conta do tamanho
+    das tabelas
+    """
+
     file_encoding: str = "latin1"
     chunck_size: int = 200_000
+
+    # Set log level
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
     @computed_field
