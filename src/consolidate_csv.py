@@ -50,15 +50,24 @@ def concatenate_files_in_directory(dir_path: Path):
     )
 
     try:
-        # Abre o arquivo de saída uma vez em modo 'wb' (Write Binary)
         with open(output_filepath, "wb") as f_out:
-            # Itera por TODOS os arquivos de origem
             for filepath in source_files:
                 logger.info(f"   + Adicionando conteúdo completo de: {filepath.name}")
-                # Abre cada arquivo de origem em modo 'rb' (Read Binary)
                 with open(filepath, "rb") as f_in:
-                    # Copia o conteúdo INTEIRO, byte a byte.
-                    shutil.copyfileobj(f_in, f_out)
+                    first = True
+                    while True:
+                        chunk = f_in.read(1024 * 64)
+                        if not chunk:
+                            break
+                        if first and settings.strip_bom:
+                            # Remove BOM UTF-8 se presente
+                            if chunk.startswith(b"\xEF\xBB\xBF"):
+                                chunk = chunk[3:]
+                            first = False
+                        if settings.normalize_line_endings:
+                            # Normaliza CRLF para LF
+                            chunk = chunk.replace(b"\r\n", b"\n")
+                        f_out.write(chunk)
 
         logger.info(f"✅ SUCESSO: Arquivo consolidado '{output_filepath}' criado.")
 
