@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     """
 
     file_encoding: str = "latin1"
-    chunck_size: int = 200_000
+    chunk_size: int = 200_000
 
     # Set log level
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"

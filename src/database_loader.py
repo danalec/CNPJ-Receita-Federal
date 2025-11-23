@@ -266,15 +266,15 @@ def process_and_load_file(conn, config_name):
 
     logger.info(f"--- Processando tabela '{table_name}' (via '{config_name}') ---")
 
-    reader = pd.read_csv(
-        file_path,
-        delimiter=";",
-        encoding=settings.file_encoding,
-        header=None,
-        names=etl_config["column_names"],
-        dtype=etl_config.get("dtype_map", None),
-        chunksize=settings.chunck_size,
-    )
+        reader = pd.read_csv(
+            file_path,
+            delimiter=";",
+            encoding=settings.file_encoding,
+            header=None,
+            names=etl_config["column_names"],
+            dtype=etl_config.get("dtype_map", None),
+            chunksize=settings.chunk_size,
+        )
 
     total_rows = 0
     for i, chunk in enumerate(reader):
@@ -353,7 +353,7 @@ def run_loader():
             process_and_load_file(conn, config_name)
 
         if settings.set_logged_after_copy:
-            logger.info("Tornando tabelas persistentes (LOGGED) novamente...")
+            logger.info("Tornando tabelas persistentes (LOGGED) após carga...")
 
             tables = [
                 "empresas",
@@ -385,7 +385,7 @@ def run_loader():
 
 
 if __name__ == "__main__":
-    from .config import setup_logging
+    from .settings import setup_logging
 
     setup_logging()
     run_loader()
