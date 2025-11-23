@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # Número de downloads simultâneos (não exagere para não tomar block)
     max_workers: int = 4
+    extract_workers: int = 2
     # Tamanho do pedaço lido na memória durante download (8KB)
     download_chunk_size: int = 8192
 
@@ -48,6 +49,9 @@ class Settings(BaseSettings):
     """
 
     set_logged_after_copy: bool = False
+    use_unlogged: bool = True
+    cluster_after_copy: bool = False
+    partition_estabelecimentos_by: Literal["none", "uf"] = "none"
 
     """
     Configurações da migração de dados, caso tenha mais memória

@@ -5,6 +5,7 @@ from itertools import groupby
 from typing import List, Iterator, Tuple
 import logging
 from .settings import settings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -131,10 +132,11 @@ def run_extraction():
 
         create_directory_if_not_exists(target_path)
 
-        # O files_iterator precisa ser convertido para uma lista para ser reutilizado
-        # ou iterado múltiplas vezes, se necessário. Aqui, iteramos uma vez.
-        for file_path in files_iterator:
-            extract_single_zip(file_path, target_path)
+        files_list = list(files_iterator)
+        with ThreadPoolExecutor(max_workers=settings.extract_workers) as executor:
+            futures = [executor.submit(extract_single_zip, fp, target_path) for fp in files_list]
+            for _ in as_completed(futures):
+                pass
 
     logging.info("\n✅ Processo de descompactação concluído com sucesso!")
 
