@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     use_unlogged: bool = True
     cluster_after_copy: bool = False
     partition_estabelecimentos_by: Literal["none", "uf"] = "none"
+    normalize_line_endings: bool = True
+    strip_bom: bool = True
 
     """
     Configurações da migração de dados, caso tenha mais memória
