@@ -248,9 +248,6 @@ ETL_CONFIG = {
 
 
 def process_and_load_file(conn, config_name):
-    """
-    Agora recebe a conexão 'conn' em vez de 'engine'.
-    """
     try:
         etl_config = ETL_CONFIG[config_name]
     except KeyError:
@@ -266,15 +263,15 @@ def process_and_load_file(conn, config_name):
 
     logger.info(f"--- Processando tabela '{table_name}' (via '{config_name}') ---")
 
-        reader = pd.read_csv(
-            file_path,
-            delimiter=";",
-            encoding=settings.file_encoding,
-            header=None,
-            names=etl_config["column_names"],
-            dtype=etl_config.get("dtype_map", None),
-            chunksize=settings.chunk_size,
-        )
+    reader = pd.read_csv(
+        file_path,
+        delimiter=";",
+        encoding=settings.file_encoding,
+        header=None,
+        names=etl_config["column_names"],
+        dtype=etl_config.get("dtype_map", None),
+        chunksize=settings.chunk_size,
+    )
 
     total_rows = 0
     for i, chunk in enumerate(reader):
@@ -307,6 +304,8 @@ def execute_sql_file(conn, filename):
     logger.info(f"Executando SQL: {filename}")
     with open(file_path, "r", encoding="utf-8") as f:
         sql_content = f.read()
+    if filename == "schema.sql" and not settings.use_unlogged:
+        sql_content = sql_content.replace("CREATE UNLOGGED TABLE", "CREATE TABLE")
 
     try:
         with conn.cursor() as cursor:
@@ -319,10 +318,62 @@ def execute_sql_file(conn, filename):
         raise
 
 
+def create_partitioned_estabelecimentos(conn):
+    ddl_parent = f"""
+    DROP TABLE IF EXISTS estabelecimentos CASCADE;
+    CREATE {'' if not settings.use_unlogged else 'UNLOGGED '}TABLE estabelecimentos (
+        cnpj_basico CHAR(8),
+        cnpj_ordem CHAR(4),
+        cnpj_dv CHAR(2),
+        identificador_matriz_filial SMALLINT,
+        nome_fantasia VARCHAR(255),
+        situacao_cadastral SMALLINT,
+        data_situacao_cadastral DATE,
+        motivo_situacao_cadastral SMALLINT,
+        nome_cidade_exterior VARCHAR(100),
+        pais_codigo SMALLINT,
+        data_inicio_atividade DATE,
+        cnae_fiscal_principal_codigo INTEGER,
+        cnae_fiscal_secundaria TEXT[],
+        tipo_logradouro VARCHAR(50),
+        logradouro VARCHAR(255),
+        numero VARCHAR(20),
+        complemento VARCHAR(255),
+        bairro VARCHAR(100),
+        cep CHAR(8),
+        uf CHAR(2),
+        municipio_codigo SMALLINT,
+        ddd_1 VARCHAR(4),
+        telefone_1 VARCHAR(9),
+        ddd_2 VARCHAR(4),
+        telefone_2 VARCHAR(9),
+        ddd_fax VARCHAR(4),
+        fax VARCHAR(9),
+        correio_eletronico VARCHAR(255),
+        situacao_especial VARCHAR(100),
+        data_situacao_especial DATE
+    ) PARTITION BY LIST (uf);
+    """
+    ufs = [
+        'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG',
+        'PA','PB','PR','PE','PI','RJ','RN','RO','RS','RR','SC','SE','SP','TO'
+    ]
+    parts = []
+    for uf in ufs:
+        parts.append(
+            f"CREATE TABLE estabelecimentos_{uf} PARTITION OF estabelecimentos FOR VALUES IN ('{uf}');"
+        )
+    parts.append("CREATE TABLE estabelecimentos_default PARTITION OF estabelecimentos DEFAULT;")
+    sql = ddl_parent + "\n".join(parts)
+    with conn.cursor() as cursor:
+        cursor.execute(sql)
+    conn.commit()
+
+
 # --- Orquestrador Principal ---
 
 
-def run_loader():
+def run_loader(only=None, exclude=None):
     logger.info("Iniciando carga para PostgreSQL (Driver Nativo)...")
 
     # Conexão direta via psycopg2
@@ -335,6 +386,8 @@ def run_loader():
     try:
         # Cria as tabelas
         execute_sql_file(conn, "schema.sql")
+        if settings.partition_estabelecimentos_by == "uf":
+            create_partitioned_estabelecimentos(conn)
 
         processing_order = [
             "paises",
@@ -347,6 +400,11 @@ def run_loader():
             "simples",
             "socios",
         ]
+
+        if only:
+            processing_order = [x for x in processing_order if x in set(only)]
+        if exclude:
+            processing_order = [x for x in processing_order if x not in set(exclude)]
 
         # Fluxo principal de processamento dos arquivos CSV para SQL
         for config_name in processing_order:
@@ -370,11 +428,34 @@ def run_loader():
             with conn.cursor() as cursor:
                 for tbl in tables:
                     cursor.execute(f"ALTER TABLE {tbl} SET LOGGED;")
+                if settings.partition_estabelecimentos_by == "uf":
+                    cursor.execute("SELECT inhrelid::regclass::text FROM pg_inherits WHERE inhparent = 'estabelecimentos'::regclass;")
+                    parts = [r[0] for r in cursor.fetchall()]
+                    for p in parts:
+                        cursor.execute(f"ALTER TABLE {p} SET LOGGED;")
             conn.commit()
 
         logger.info("Aplicando Constraints e Índices...")
         execute_sql_file(conn, "constraints.sql")
+        with conn.cursor() as cursor:
+            for t in [
+                "empresas",
+                "estabelecimentos",
+                "socios",
+                "simples",
+                "paises",
+                "municipios",
+                "qualificacoes_socios",
+                "naturezas_juridicas",
+                "cnaes",
+            ]:
+                cursor.execute(f"ANALYZE {t};")
+        conn.commit()
 
+        if settings.cluster_after_copy and settings.partition_estabelecimentos_by == "uf":
+            with conn.cursor() as cursor:
+                cursor.execute("CLUSTER estabelecimentos USING idx_estabelecimentos_uf;")
+            conn.commit()
         logger.info("Carga finalizada com sucesso.")
 
     except Exception as e:
