@@ -85,7 +85,7 @@ def clean_data_dirs() -> None:
     logger.info("Diretórios limpos.")
 
 
-def check_updates() -> Optional[str]:
+def check_updates(skip_clean: bool = False) -> Optional[str]:
     logger.info("Verificando atualizações na Receita Federal...")
 
     latest_remote = get_latest_remote_date()
@@ -106,8 +106,9 @@ def check_updates() -> Optional[str]:
     # O settings.download_url se atualizará sozinho graças ao @computed_field
     settings.target_date = latest_remote
 
-    logger.info("Removendo arquivos antigos! Caso existam")
-    clean_data_dirs()
+    if not skip_clean:
+        logger.info("Removendo arquivos antigos! Caso existam")
+        clean_data_dirs()
 
     return latest_remote
 

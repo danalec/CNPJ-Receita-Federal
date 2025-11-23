@@ -1,0 +1,28 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cnpj}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cnpj}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-cnpj}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  app:
+    build: .
+    depends_on:
+      - db
+    environment:
+      postgres_user: ${POSTGRES_USER:-cnpj}
+      postgres_password: ${POSTGRES_PASSWORD:-cnpj}
+      postgres_host: db
+      postgres_port: 5432
+      postgres_database: ${POSTGRES_DATABASE:-cnpj}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    command: ["python","main.py","full"]
+volumes:
+  pgdata:
