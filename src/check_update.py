@@ -46,7 +46,7 @@ def get_latest_remote_date() -> str:
         return None
 
 
-def get_local_version() -> None:
+def get_local_version() -> Optional[str]:
     """Lê a última versão processada do arquivo de estado."""
     state_file = settings.state_file
 
