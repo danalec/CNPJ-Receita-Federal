@@ -53,7 +53,31 @@ def extract_single_zip(zip_path: Path, destination_dir: Path):
 
     try:
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(destination_dir)
+            for member in zip_ref.infolist():
+                member_path = Path(member.filename)
+                if member_path.is_absolute():
+                    logging.warning(f"   ~ Ignorando entrada absoluta: {member.filename}")
+                    continue
+
+                target_path = (destination_dir / member_path).resolve()
+                base_dir = destination_dir.resolve()
+                try:
+                    # Garantir que o caminho alvo permaneça dentro do destino
+                    if not str(target_path).startswith(str(base_dir)):
+                        logging.warning(
+                            f"   ~ Ignorando entrada potencialmente maliciosa: {member.filename}"
+                        )
+                        continue
+                except Exception:
+                    logging.warning(f"   ~ Ignorando entrada inválida: {member.filename}")
+                    continue
+
+                if member.is_dir():
+                    target_path.mkdir(parents=True, exist_ok=True)
+                else:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    with zip_ref.open(member, "r") as src, open(target_path, "wb") as dst:
+                        dst.write(src.read())
 
     except zipfile.BadZipFile:
         logging.error(
@@ -116,4 +140,4 @@ def run_extraction():
 
 
 if __name__ == "__main__":
-    run_extraction(settings.compressed_dir, settings.extracted_dir)
+    run_extraction()
