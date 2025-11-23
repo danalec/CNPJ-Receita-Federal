@@ -125,11 +125,11 @@ def run_download():
         zip_links = get_zip_links(target_url)
     except Exception:
         logger.error("Abortando download devido a erro na listagem de arquivos.")
-        return
+        raise
 
     if not zip_links:
-        logger.warning("Nenhum arquivo encontrado para baixar.")
-        return
+        logger.error("Nenhum arquivo encontrado para baixar.")
+        raise
 
     # 4. Inicia o ThreadPool para baixar em paralelo
     logger.info(

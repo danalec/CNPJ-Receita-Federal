@@ -1,21 +1,17 @@
 import pandas as pd
 import logging
 import io
+from pathlib import Path
 from sqlalchemy import create_engine, text
-from .models import Base
 from .settings import settings
 
 logger = logging.getLogger(__name__)
 
+# --- Funções de Carga e Limpeza (Mantidas iguais, resumidas aqui) ---
+
 
 def fast_load_chunk(engine, df, table_name):
-    """
-    Função de Carga Ultra-Rápida (PostgreSQL COPY) com Mapeamento Explícito.
-    """
-
-    # 1. Converte o DataFrame para CSV em memória
     output = io.StringIO()
-
     df.to_csv(
         output,
         sep=";",
@@ -25,11 +21,8 @@ def fast_load_chunk(engine, df, table_name):
         quotechar='"',
         doublequote=True,
     )
-
     output.seek(0)
 
-    # 2. Pega os nomes das colunas do DataFrame para garantir o mapeamento correto
-    # Isso resolve o problema de colunas fora de ordem entre Model e CSV
     columns = df.columns.tolist()
     columns_str = ",".join([f'"{col}"' for col in columns])
 
@@ -37,19 +30,10 @@ def fast_load_chunk(engine, df, table_name):
     cursor = connection.cursor()
 
     try:
-        # 3. Comando COPY com colunas EXPLICITAS
-        # COPY tabela (col1, col2, col3...) FROM STDIN ...
-        sql = f"""
-            COPY {table_name} ({columns_str})
-            FROM STDIN 
-            WITH (
-                FORMAT CSV, 
-                DELIMITER ';', 
-                NULL '', 
-                QUOTE '"', 
-                HEADER FALSE
-            )
-        """
+        sql = (
+            f"COPY {table_name} ({columns_str}) FROM STDIN WITH"
+            "(FORMAT CSV, DELIMITER ';', NULL '', QUOTE '\"', HEADER FALSE)"
+        )
         cursor.copy_expert(sql, output)
         connection.commit()
     except Exception as e:
@@ -61,11 +45,7 @@ def fast_load_chunk(engine, df, table_name):
         connection.close()
 
 
-# --- Hooks de Limpeza ---
-
-
 def sanitize_dates(df, date_columns):
-    """Converte colunas de data, transformando erros (ex: '0') em NaT/NULL."""
     for col in date_columns:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce")
@@ -73,7 +53,6 @@ def sanitize_dates(df, date_columns):
 
 
 def clean_empresas_chunk(chunk_df):
-    """Aplica limpezas no chunk de empresas."""
     if "capital_social" in chunk_df.columns:
         capital_social_str = (
             chunk_df["capital_social"].astype(str).str.replace(",", ".", regex=False)
@@ -83,49 +62,41 @@ def clean_empresas_chunk(chunk_df):
 
 
 def clean_estabelecimentos_chunk(chunk_df):
-    """
-    Prepara o chunk de estabelecimentos:
-    1. Limpa datas (converte '0' para NULL)
-    2. Formata array de CNAEs
-    """
-    # 1. Limpeza de Datas
     date_cols = [
         "data_situacao_cadastral",
         "data_inicio_atividade",
         "data_situacao_especial",
     ]
     chunk_df = sanitize_dates(chunk_df, date_cols)
-
-    # 2. Limpeza de Array CNAE
     col_name = "cnae_fiscal_secundaria"
     if col_name in chunk_df.columns:
         chunk_df[col_name] = chunk_df[col_name].fillna("")
         mask = chunk_df[col_name] != ""
-        # Adiciona chaves {} para formato array do Postgres
         chunk_df.loc[mask, col_name] = "{" + chunk_df.loc[mask, col_name] + "}"
         chunk_df.loc[~mask, col_name] = None
-
     return chunk_df
 
 
 def clean_socios_chunk(chunk_df):
-    date_cols = ["data_entrada_sociedade"]
-    return sanitize_dates(chunk_df, date_cols)
+    return sanitize_dates(chunk_df, ["data_entrada_sociedade"])
 
 
 def clean_simples_chunk(chunk_df):
-    date_cols = [
-        "data_opcao_pelo_simples",
-        "data_exclusao_do_simples",
-        "data_opcao_pelo_mei",
-        "data_exclusao_do_mei",
-    ]
-    return sanitize_dates(chunk_df, date_cols)
+    return sanitize_dates(
+        chunk_df,
+        [
+            "data_opcao_pelo_simples",
+            "data_exclusao_do_simples",
+            "data_opcao_pelo_mei",
+            "data_exclusao_do_mei",
+        ],
+    )
 
 
-# Estruturação dos dados que serão migrados
+# --- Configuração ETL ---
 
 ETL_CONFIG = {
+    # As chaves aqui devem bater com o nome da PASTA/ARQUIVO CSV extraído
     "paises": {
         "table_name": "paises",
         "column_names": ["codigo", "nome"],
@@ -265,7 +236,6 @@ ETL_CONFIG = {
     },
 }
 
-
 # --- Processador ---
 
 
@@ -277,13 +247,16 @@ def process_and_load_file(engine, config_name):
         return
 
     table_name = etl_config["table_name"]
+
+    # Aqui assume-se que o arquivo CSV tem o mesmo nome da
+    # chave do config (ex: naturezas/naturezas.csv)
     file_path = settings.extracted_dir / config_name / f"{config_name}.csv"
 
     if not file_path.exists():
         logger.warning(f"Arquivo '{file_path}' não encontrado. Pulando.")
         return
 
-    logger.info(f"--- Processando tabela '{table_name}' (Modo: PostgreSQL COPY) ---")
+    logger.info(f"--- Processando tabela '{table_name}' (via '{config_name}') ---")
 
     reader = pd.read_csv(
         file_path,
@@ -299,35 +272,43 @@ def process_and_load_file(engine, config_name):
     for i, chunk in enumerate(reader):
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
-
         fast_load_chunk(engine, chunk, table_name)
-
         total_rows += len(chunk)
         logger.info(f"  ... Chunk {i + 1} processado. Total: {total_rows} linhas.")
 
     logger.info(f"--- Tabela '{table_name}' finalizada! ---")
 
 
-# --- Orquestrador ---
+# --- Executor de SQL ---
+
+
+def execute_sql_file(engine, filename):
+    base_path = Path(__file__).parent
+    file_path = base_path / filename
+
+    if not file_path.exists():
+        logger.error(f"Arquivo SQL não encontrado: {file_path}")
+        return
+
+    logger.info(f"Executando SQL: {filename}")
+    with open(file_path, "r", encoding="utf-8") as f:
+        sql_content = f.read()
+
+    with engine.begin() as conn:
+        conn.execute(text(sql_content))
+
+
+# --- Orquestrador Principal ---
 
 
 def run_loader():
     logger.info("Iniciando carga para PostgreSQL...")
-
     engine = create_engine(settings.database_uri)
 
-    logger.info("Recriando schema...")
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    # Cria as tabelas
+    execute_sql_file(engine, "schema.sql")
 
-    if settings.set_unlogged_before_copy:
-        with engine.connect() as conn:
-            conn.execute(text("ALTER TABLE empresas SET UNLOGGED;"))
-            conn.execute(text("ALTER TABLE estabelecimentos SET UNLOGGED;"))
-            conn.execute(text("ALTER TABLE socios SET UNLOGGED;"))
-            conn.execute(text("ALTER TABLE simples SET UNLOGGED;"))
-            conn.commit()
-
+    # Aqui são os nomes dos arquivos CSV, que serão processados
     processing_order = [
         "paises",
         "municipios",
@@ -340,19 +321,33 @@ def run_loader():
         "socios",
     ]
 
-    for table_config_name in processing_order:
-        process_and_load_file(engine, table_config_name)
-
-    logger.info("Carga finalizada.")
+    for config_name in processing_order:
+        process_and_load_file(engine, config_name)
 
     if settings.set_unlogged_before_copy:
-        with engine.connect() as conn:
-            logger.info("Tornando tabelas persistentes (LOGGED) novamente...")
-            conn.execute(text("ALTER TABLE empresas SET LOGGED;"))
-            conn.execute(text("ALTER TABLE estabelecimentos SET LOGGED;"))
-            conn.execute(text("ALTER TABLE socios SET LOGGED;"))
-            conn.execute(text("ALTER TABLE simples SET LOGGED;"))
-            conn.commit()
+        logger.info("Tornando tabelas persistentes (LOGGED) novamente...")
+
+        tables = [
+            "empresas",
+            "estabelecimentos",
+            "socios",
+            "simples",
+            "paises",
+            "municipios",
+            "qualificacoes_socios",
+            "naturezas_juridicas",
+            "cnaes",
+        ]
+
+        with engine.begin() as conn:
+            for tbl in tables:
+                conn.execute(text(f"ALTER TABLE {tbl} SET LOGGED;"))
+
+    # Cria Índices e Chaves Estrangeiras (Pós-Carga para performance)
+    logger.info("Aplicando Constraints e Índices...")
+    execute_sql_file(engine, "constraints.sql")
+
+    logger.info("Carga finalizada com sucesso.")
 
 
 if __name__ == "__main__":

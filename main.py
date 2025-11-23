@@ -6,10 +6,7 @@ from src.downloader import run_download
 from src.consolidate_csv import run_consolidation
 from src.database_loader import run_loader
 from src.settings import setup_logging
-from src.check_update import (
-    check_updates,
-    update_local_version,
-)  # Importe o update_local_version
+from src.check_update import check_updates, update_local_version
 
 setup_logging()
 logger = logging.getLogger(__name__)
