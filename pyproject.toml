@@ -13,7 +13,9 @@ dependencies = [
     "pydantic-settings (>=2.12.0,<3.0.0)",
     "tqdm (>=4.66.4,<5.0.0)",
     "requests (>=2.32.5,<3.0.0)",
-    "beautifulsoup4 (>=4.12.3,<5.0.0)"
+    "beautifulsoup4 (>=4.12.3,<5.0.0)",
+    "pandera[io] (>=0.20.3,<1.0.0)",
+    "charset-normalizer (>=3.3.2,<4.0.0)"
 ]
 
 # Packaging configuration removed; this project is app-oriented and not distributing a package.
