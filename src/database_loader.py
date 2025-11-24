@@ -4,6 +4,7 @@ import io
 import psycopg2
 from pathlib import Path
 from .settings import settings
+from .validation import validate as schema_validate
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,81 @@ def fast_load_chunk(conn, df, table_name):
         conn.rollback()
         logger.error(f"Erro no COPY para tabela {table_name}: {e}")
         raise
+
+
+DOMAIN_CACHE = {}
+
+
+def _get_domain_set(conn, table, column):
+    key = (table, column)
+    if key in DOMAIN_CACHE:
+        return DOMAIN_CACHE[key]
+    with conn.cursor() as cursor:
+        cursor.execute(f"SELECT DISTINCT {column} FROM {table}")
+        s = set(r[0] for r in cursor.fetchall() if r[0] is not None)
+    DOMAIN_CACHE[key] = s
+    return s
+
+
+UF_SET = {
+    'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RO','RS','RR','SC','SE','SP','TO'
+}
+
+
+def _ensure_domains_loaded(conn, domains):
+    with conn.cursor() as cursor:
+        for tbl in domains:
+            cursor.execute(f"SELECT COUNT(*) FROM {tbl}")
+            cnt = cursor.fetchone()[0]
+            if cnt == 0:
+                raise RuntimeError(f"Tabela de domínio '{tbl}' ainda não carregada. Ajuste a ordem ou remova filtros --only/--exclude.")
+
+
+def _validate_fk_set(df, column, valid_set, label):
+    vals = set(df[column].dropna().unique()) if column in df.columns else set()
+    missing = vals - valid_set
+    if missing:
+        sample = list(missing)[:10]
+        raise ValueError(f"Valores inválidos em '{label}': {sample} (total {len(missing)}). Garanta que a tabela de domínio está carregada e os códigos são válidos.")
+
+
+def validate_chunk(config_name, chunk_df, conn):
+    if config_name == "empresas":
+        _ensure_domains_loaded(conn, ["naturezas_juridicas", "qualificacoes_socios"])
+        nat = _get_domain_set(conn, "naturezas_juridicas", "codigo")
+        qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
+        if "natureza_juridica_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "natureza_juridica_codigo", nat, "natureza_juridica_codigo")
+        if "qualificacao_responsavel" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "qualificacao_responsavel", qual, "qualificacao_responsavel")
+    elif config_name == "estabelecimentos":
+        _ensure_domains_loaded(conn, ["paises", "municipios", "cnaes", "empresas"])
+        paises = _get_domain_set(conn, "paises", "codigo")
+        municipios = _get_domain_set(conn, "municipios", "codigo")
+        cnaes = _get_domain_set(conn, "cnaes", "codigo")
+        if "pais_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo")
+        if "municipio_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "municipio_codigo", municipios, "municipio_codigo")
+        if "cnae_fiscal_principal_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "cnae_fiscal_principal_codigo", cnaes, "cnae_fiscal_principal_codigo")
+        if "uf" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "uf", UF_SET, "uf")
+        if "cnae_fiscal_secundaria" in chunk_df.columns:
+            s = chunk_df["cnae_fiscal_secundaria"].dropna().astype(str)
+            bad = ~((s.str.startswith("{") & s.str.endswith("}")) | (s == ""))
+            if bad.any():
+                raise ValueError("Campo cnae_fiscal_secundaria com formato inválido em algumas linhas. Esperado texto de array PostgreSQL: '{...}'.")
+    elif config_name == "socios":
+        _ensure_domains_loaded(conn, ["paises", "qualificacoes_socios", "empresas"])
+        paises = _get_domain_set(conn, "paises", "codigo")
+        qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
+        if "pais_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo")
+        if "qualificacao_socio_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "qualificacao_socio_codigo", qual, "qualificacao_socio_codigo")
+        if "qualificacao_representante_legal_codigo" in chunk_df.columns:
+            _validate_fk_set(chunk_df, "qualificacao_representante_legal_codigo", qual, "qualificacao_representante_legal_codigo")
 
 
 def sanitize_dates(df, date_columns):
@@ -266,7 +342,7 @@ def process_and_load_file(conn, config_name):
     reader = pd.read_csv(
         file_path,
         delimiter=";",
-        encoding=settings.file_encoding,
+        encoding=_detect_encoding(file_path, settings.file_encoding),
         header=None,
         names=etl_config["column_names"],
         dtype=etl_config.get("dtype_map", None),
@@ -277,6 +353,8 @@ def process_and_load_file(conn, config_name):
     for i, chunk in enumerate(reader):
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
+        chunk = schema_validate(config_name, chunk)
+        validate_chunk(config_name, chunk, conn)
 
         # Passa a conexão direta
         fast_load_chunk(conn, chunk, table_name)
@@ -316,6 +394,41 @@ def execute_sql_file(conn, filename):
         conn.rollback()
         logger.error(f"ERRO ao executar SQL de {filename}: {e}")
         raise
+
+
+def execute_sql_path(conn, path: Path):
+    if not path.exists():
+        logger.error(f"Arquivo SQL não encontrado: {path}")
+        return
+    logger.info(f"Executando SQL: {path.name}")
+    sql_content = path.read_text(encoding="utf-8")
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql_content)
+        conn.commit()
+        logger.info(f"Sucesso ao executar {path.name}")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"ERRO ao executar SQL de {path.name}: {e}")
+        raise
+
+
+def run_queries_in_dir(dir_path: Path):
+    try:
+        conn = psycopg2.connect(settings.database_uri)
+    except Exception as e:
+        logger.error(f"Erro ao conectar no banco: {e}")
+        return
+    try:
+        files = sorted([p for p in dir_path.glob("*.sql")])
+        for f in files:
+            execute_sql_path(conn, f)
+        logger.info("Execução de queries finalizada.")
+    except Exception as e:
+        logger.error(f"Erro durante execução de queries: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
 
 
 def create_partitioned_estabelecimentos(conn):
@@ -470,3 +583,12 @@ if __name__ == "__main__":
 
     setup_logging()
     run_loader()
+def _detect_encoding(file_path: Path, default: str) -> str:
+    try:
+        from charset_normalizer import from_path
+        res = from_path(str(file_path)).best()
+        if res and res.encoding:
+            return res.encoding
+    except Exception:
+        return default
+    return default

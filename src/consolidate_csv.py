@@ -1,5 +1,4 @@
 import logging
-import shutil
 from pathlib import Path
 from typing import List
 from .settings import settings
@@ -16,19 +15,11 @@ def get_subdirectories(base_path: Path):
     return (item for item in base_path.iterdir() if item.is_dir())
 
 
-def get_source_csv_files(directory: Path, output_filename: str) -> List[Path]:
-    """
-    Encontra todos os arquivos .csv (ou .CSV), ignorando o arquivo de saída.
-    """
-    all_files = directory.glob("*")
-    return [
-        f
-        for f in all_files
-        if f.name != output_filename and f.suffix.lower() == ".csv"
-    ]
+def get_source_files(directory: Path, output_filepath: Path) -> List[Path]:
+    return [f for f in directory.iterdir() if f.is_file() and f != output_filepath]
 
 
-def concatenate_files_in_directory(dir_path: Path):
+def concatenate_files_in_directory(dir_path: Path, delete_sources: bool = False):
     """
     Concatena TODOS os bytes de todos os arquivos de origem,
     pois eles não têm cabeçalho. Evitando também erros de charset
@@ -37,7 +28,7 @@ def concatenate_files_in_directory(dir_path: Path):
     output_filename = f"{dir_path.name}.csv"
     output_filepath = dir_path / output_filename
 
-    source_files = get_source_csv_files(dir_path, output_filename)
+    source_files = get_source_files(dir_path, output_filepath)
 
     if not source_files:
         logger.warning(
@@ -50,15 +41,29 @@ def concatenate_files_in_directory(dir_path: Path):
     )
 
     try:
-        # Abre o arquivo de saída uma vez em modo 'wb' (Write Binary)
         with open(output_filepath, "wb") as f_out:
-            # Itera por TODOS os arquivos de origem
             for filepath in source_files:
                 logger.info(f"   + Adicionando conteúdo completo de: {filepath.name}")
-                # Abre cada arquivo de origem em modo 'rb' (Read Binary)
                 with open(filepath, "rb") as f_in:
-                    # Copia o conteúdo INTEIRO, byte a byte.
-                    shutil.copyfileobj(f_in, f_out)
+                    first = True
+                    while True:
+                        chunk = f_in.read(1024 * 64)
+                        if not chunk:
+                            break
+                        if first and settings.strip_bom:
+                            if chunk.startswith(b"\xEF\xBB\xBF"):
+                                chunk = chunk[3:]
+                            first = False
+                        if settings.normalize_line_endings:
+                            chunk = chunk.replace(b"\r\n", b"\n")
+                        f_out.write(chunk)
+
+        if delete_sources:
+            for filepath in source_files:
+                try:
+                    filepath.unlink()
+                except Exception:
+                    pass
 
         logger.info(f"✅ SUCESSO: Arquivo consolidado '{output_filepath}' criado.")
 
@@ -69,7 +74,7 @@ def concatenate_files_in_directory(dir_path: Path):
         raise
 
 
-def run_consolidation():
+def run_consolidation(delete_sources: bool = False):
     """
     Função principal que orquestra todo o processo de concatenação.
     """
@@ -85,6 +90,6 @@ def run_consolidation():
     subdirectories = get_subdirectories(extracted_dir)
 
     for subdir in subdirectories:
-        concatenate_files_in_directory(subdir)
+        concatenate_files_in_directory(subdir, delete_sources=delete_sources)
 
     logger.info("Processo de consolidação finalizado.")
