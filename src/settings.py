@@ -96,6 +96,10 @@ class Settings(BaseSettings):
         return self.data_dir / "extracted_files"
 
     @computed_field
+    def queries_dir(self) -> Path:
+        return self.project_root / "queries"
+
+    @computed_field
     def database_uri(self) -> str:
         return (
             f"postgresql://{self.postgres_user}"
@@ -111,6 +115,7 @@ class Settings(BaseSettings):
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.compressed_dir.mkdir(parents=True, exist_ok=True)
         self.extracted_dir.mkdir(parents=True, exist_ok=True)
+        self.queries_dir.mkdir(parents=True, exist_ok=True)
 
 
 # Instancia e cria diretórios

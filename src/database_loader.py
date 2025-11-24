@@ -396,6 +396,41 @@ def execute_sql_file(conn, filename):
         raise
 
 
+def execute_sql_path(conn, path: Path):
+    if not path.exists():
+        logger.error(f"Arquivo SQL não encontrado: {path}")
+        return
+    logger.info(f"Executando SQL: {path.name}")
+    sql_content = path.read_text(encoding="utf-8")
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(sql_content)
+        conn.commit()
+        logger.info(f"Sucesso ao executar {path.name}")
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"ERRO ao executar SQL de {path.name}: {e}")
+        raise
+
+
+def run_queries_in_dir(dir_path: Path):
+    try:
+        conn = psycopg2.connect(settings.database_uri)
+    except Exception as e:
+        logger.error(f"Erro ao conectar no banco: {e}")
+        return
+    try:
+        files = sorted([p for p in dir_path.glob("*.sql")])
+        for f in files:
+            execute_sql_path(conn, f)
+        logger.info("Execução de queries finalizada.")
+    except Exception as e:
+        logger.error(f"Erro durante execução de queries: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+
 def create_partitioned_estabelecimentos(conn):
     ddl_parent = f"""
     DROP TABLE IF EXISTS estabelecimentos CASCADE;
