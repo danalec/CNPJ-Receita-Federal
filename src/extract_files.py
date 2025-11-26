@@ -1,4 +1,3 @@
-import re
 import zipfile
 from pathlib import Path
 from itertools import groupby
@@ -15,9 +14,8 @@ def get_file_base_name(path: Path) -> str:
     Extrai o nome base de um arquivo, removendo números e a extensão.
     Exemplo: "Empresas4.zip" -> "Empresas"
     """
-    # path.stem retorna o nome do arquivo sem a extensão final (ex: "Empresas4")
-    match = re.match(r"([a-zA-Z]+)", path.stem)
-    return match.group(1) if match else "desconhecido"
+    base = ''.join(__import__('itertools').takewhile(str.isalpha, path.stem))
+    return base or "desconhecido"
 
 
 def group_files(paths: List[Path]) -> Iterator[Tuple[str, Iterator[Path]]]:
