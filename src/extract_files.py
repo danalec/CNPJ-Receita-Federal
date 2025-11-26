@@ -1,10 +1,11 @@
-import re
 import zipfile
+import os
 from pathlib import Path
 from itertools import groupby
 from typing import List, Iterator, Tuple
 import logging
 from .settings import settings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +15,8 @@ def get_file_base_name(path: Path) -> str:
     Extrai o nome base de um arquivo, removendo números e a extensão.
     Exemplo: "Empresas4.zip" -> "Empresas"
     """
-    # path.stem retorna o nome do arquivo sem a extensão final (ex: "Empresas4")
-    match = re.match(r"([a-zA-Z]+)", path.stem)
-    return match.group(1) if match else "desconhecido"
+    base = ''.join(__import__('itertools').takewhile(str.isalpha, path.stem))
+    return base or "desconhecido"
 
 
 def group_files(paths: List[Path]) -> Iterator[Tuple[str, Iterator[Path]]]:
@@ -53,7 +53,32 @@ def extract_single_zip(zip_path: Path, destination_dir: Path):
 
     try:
         with zipfile.ZipFile(zip_path, "r") as zip_ref:
-            zip_ref.extractall(destination_dir)
+            for member in zip_ref.infolist():
+                member_path = Path(member.filename)
+                if member_path.is_absolute():
+                    logging.warning(f"   ~ Ignorando entrada absoluta: {member.filename}")
+                    continue
+
+                target_path = (destination_dir / member_path).resolve()
+                base_dir = destination_dir.resolve()
+                try:
+                    base_str = str(base_dir)
+                    target_str = str(target_path)
+                    if os.path.commonpath([base_str, target_str]) != base_str:
+                        logging.warning(
+                            f"   ~ Ignorando entrada potencialmente maliciosa: {member.filename}"
+                        )
+                        continue
+                except Exception:
+                    logging.warning(f"   ~ Ignorando entrada inválida: {member.filename}")
+                    continue
+
+                if member.is_dir():
+                    target_path.mkdir(parents=True, exist_ok=True)
+                else:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    with zip_ref.open(member, "r") as src, open(target_path, "wb") as dst:
+                        dst.write(src.read())
 
     except zipfile.BadZipFile:
         logging.error(
@@ -107,13 +132,14 @@ def run_extraction():
 
         create_directory_if_not_exists(target_path)
 
-        # O files_iterator precisa ser convertido para uma lista para ser reutilizado
-        # ou iterado múltiplas vezes, se necessário. Aqui, iteramos uma vez.
-        for file_path in files_iterator:
-            extract_single_zip(file_path, target_path)
+        files_list = list(files_iterator)
+        with ThreadPoolExecutor(max_workers=settings.extract_workers) as executor:
+            futures = [executor.submit(extract_single_zip, fp, target_path) for fp in files_list]
+            for _ in as_completed(futures):
+                pass
 
     logging.info("\n✅ Processo de descompactação concluído com sucesso!")
 
 
 if __name__ == "__main__":
-    run_extraction(settings.compressed_dir, settings.extracted_dir)
+    run_extraction()

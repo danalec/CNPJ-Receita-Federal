@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # Número de downloads simultâneos (não exagere para não tomar block)
     max_workers: int = 4
+    extract_workers: int = 2
     # Tamanho do pedaço lido na memória durante download (8KB)
     download_chunk_size: int = 8192
 
@@ -48,6 +49,11 @@ class Settings(BaseSettings):
     """
 
     set_logged_after_copy: bool = False
+    use_unlogged: bool = True
+    cluster_after_copy: bool = False
+    partition_estabelecimentos_by: Literal["none", "uf"] = "none"
+    normalize_line_endings: bool = True
+    strip_bom: bool = True
 
     """
     Configurações da migração de dados, caso tenha mais memória
@@ -57,7 +63,7 @@ class Settings(BaseSettings):
     """
 
     file_encoding: str = "latin1"
-    chunck_size: int = 200_000
+    chunk_size: int = 200_000
 
     # Set log level
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
@@ -90,6 +96,10 @@ class Settings(BaseSettings):
         return self.data_dir / "extracted_files"
 
     @computed_field
+    def queries_dir(self) -> Path:
+        return self.project_root / "queries"
+
+    @computed_field
     def database_uri(self) -> str:
         return (
             f"postgresql://{self.postgres_user}"
@@ -105,6 +115,7 @@ class Settings(BaseSettings):
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.compressed_dir.mkdir(parents=True, exist_ok=True)
         self.extracted_dir.mkdir(parents=True, exist_ok=True)
+        self.queries_dir.mkdir(parents=True, exist_ok=True)
 
 
 # Instancia e cria diretórios
