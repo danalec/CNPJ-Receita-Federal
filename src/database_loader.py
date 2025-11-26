@@ -144,10 +144,10 @@ def sanitize_dates(df, date_columns):
 
 def clean_empresas_chunk(chunk_df):
     if "capital_social" in chunk_df.columns:
-        capital_social_str = (
-            chunk_df["capital_social"].astype(str).str.replace(",", ".", regex=False)
+        chunk_df["capital_social"] = pd.to_numeric(
+            chunk_df["capital_social"].astype(str).str.replace(",", ".", regex=False),
+            errors="coerce",
         )
-        chunk_df["capital_social"] = pd.to_numeric(capital_social_str, errors="coerce")
     return chunk_df
 
 
@@ -160,10 +160,8 @@ def clean_estabelecimentos_chunk(chunk_df):
     chunk_df = sanitize_dates(chunk_df, date_cols)
     col_name = "cnae_fiscal_secundaria"
     if col_name in chunk_df.columns:
-        chunk_df[col_name] = chunk_df[col_name].fillna("")
-        mask = chunk_df[col_name] != ""
-        chunk_df.loc[mask, col_name] = "{" + chunk_df.loc[mask, col_name] + "}"
-        chunk_df.loc[~mask, col_name] = None
+        s = chunk_df[col_name].fillna("")
+        chunk_df[col_name] = s.where(s.eq(""), "{" + s + "}").mask(s.eq(""), None)
     return chunk_df
 
 
