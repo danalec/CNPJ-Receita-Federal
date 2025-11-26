@@ -516,6 +516,7 @@ def run_loader(only=None, exclude=None):
         return
 
     try:
+        clear_domain_cache()
         # Cria as tabelas
         execute_sql_file(conn, "schema.sql")
         if settings.partition_estabelecimentos_by == "uf":
@@ -611,3 +612,5 @@ def _detect_encoding(file_path: Path, default: str) -> str:
     except Exception:
         return default
     return default
+def clear_domain_cache():
+    DOMAIN_CACHE.clear()
