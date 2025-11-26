@@ -68,20 +68,45 @@ def download_file(url: str, dest_dir: Path):
     session = get_session()
 
     try:
-        # Faz uma requisição com stream=True para não carregar tudo na RAM
-        with session.get(url, stream=True, timeout=60) as r:
+        existing_size = dest_path.stat().st_size if dest_path.exists() else 0
+        try:
+            h = session.head(url, timeout=30, allow_redirects=True)
+            h.raise_for_status()
+            total_size = int(h.headers.get("content-length", 0))
+        except Exception:
+            total_size = 0
+
+        if total_size and existing_size >= total_size:
+            logger.info(f"Download já completo: {filename}")
+            return True
+
+        headers = {}
+        initial = 0
+        mode = "wb"
+        if existing_size and total_size and existing_size < total_size:
+            headers["Range"] = f"bytes={existing_size}-"
+            initial = existing_size
+            mode = "ab"
+
+        with session.get(url, stream=True, timeout=60, headers=headers) as r:
             r.raise_for_status()
-            total_size = int(r.headers.get("content-length", 0))
+            content_range = r.headers.get("content-range")
+            if headers and not content_range:
+                mode = "wb"
+                initial = 0
+
+            total = total_size if total_size > 0 else None
 
             with (
-                open(dest_path, "wb") as f,
+                open(dest_path, mode) as f,
                 tqdm(
                     desc=filename,
-                    total=total_size,
+                    total=total,
                     unit="iB",
                     unit_scale=True,
                     unit_divisor=1024,
                     leave=False,
+                    initial=initial,
                 ) as bar,
             ):
                 for chunk in r.iter_content(chunk_size=download_chunck_size):
