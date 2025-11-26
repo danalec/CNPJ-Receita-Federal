@@ -1,6 +1,7 @@
 import pandas as pd
 import logging
 import io
+import re
 import psycopg2
 from pathlib import Path
 from .settings import settings
@@ -160,8 +161,13 @@ def clean_estabelecimentos_chunk(chunk_df):
     chunk_df = sanitize_dates(chunk_df, date_cols)
     col_name = "cnae_fiscal_secundaria"
     if col_name in chunk_df.columns:
-        s = chunk_df[col_name].fillna("")
-        chunk_df[col_name] = s.where(s.eq(""), "{" + s + "}").mask(s.eq(""), None)
+        s = chunk_df[col_name].fillna("").astype(str)
+        def to_pg_array(x):
+            if not x.strip():
+                return None
+            parts = [p.strip() for p in re.split(r"[;,]", x) if p.strip()]
+            return "{" + ",".join(parts) + "}" if parts else None
+        chunk_df[col_name] = s.map(to_pg_array)
     return chunk_df
 
 
