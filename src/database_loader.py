@@ -3,6 +3,7 @@ import logging
 import io
 import re
 import psycopg2
+from psycopg2 import sql
 from pathlib import Path
 from .settings import settings
 from .validation import validate as schema_validate
@@ -32,23 +33,18 @@ def fast_load_chunk(conn, df, table_name):
     output.seek(0)
 
     columns = df.columns.tolist()
-    columns_str = ",".join([f'"{col}"' for col in columns])
 
     # Usa um cursor para executar o COPY
     try:
         with conn.cursor() as cursor:
-            sql = f"""
-                COPY {table_name} ({columns_str}) 
-                FROM STDIN 
-                WITH (
-                    FORMAT CSV, 
-                    DELIMITER ';', 
-                    NULL '', 
-                    QUOTE '"', 
-                    HEADER FALSE
-                )
-            """
-            cursor.copy_expert(sql, output)
+            ident_cols = [sql.Identifier(c) for c in columns]
+            copy_stmt = sql.SQL(
+                "COPY {table} ({cols}) FROM STDIN WITH (FORMAT CSV, DELIMITER ';', NULL '', QUOTE '\"', HEADER FALSE)"
+            ).format(
+                table=sql.Identifier(table_name),
+                cols=sql.SQL(", ").join(ident_cols),
+            )
+            cursor.copy_expert(copy_stmt.as_string(conn), output)
 
         # O commit é feito no nível superior (loop de processamento)
         # para evitar commit a cada chunk pequeno se desejar,
@@ -69,7 +65,12 @@ def _get_domain_set(conn, table, column):
     if key in DOMAIN_CACHE:
         return DOMAIN_CACHE[key]
     with conn.cursor() as cursor:
-        cursor.execute(f"SELECT DISTINCT {column} FROM {table}")
+        cursor.execute(
+            sql.SQL("SELECT DISTINCT {col} FROM {tbl}").format(
+                col=sql.Identifier(column),
+                tbl=sql.Identifier(table),
+            )
+        )
         s = set(r[0] for r in cursor.fetchall() if r[0] is not None)
     DOMAIN_CACHE[key] = s
     return s
@@ -83,7 +84,9 @@ UF_SET = {
 def _ensure_domains_loaded(conn, domains):
     with conn.cursor() as cursor:
         for tbl in domains:
-            cursor.execute(f"SELECT COUNT(*) FROM {tbl}")
+            cursor.execute(
+                sql.SQL("SELECT COUNT(*) FROM {tbl}").format(tbl=sql.Identifier(tbl))
+            )
             cnt = cursor.fetchone()[0]
             if cnt == 0:
                 raise RuntimeError(f"Tabela de domínio '{tbl}' ainda não carregada. Ajuste a ordem ou remova filtros --only/--exclude.")
@@ -477,13 +480,25 @@ def create_partitioned_estabelecimentos(conn):
     ]
     parts = []
     for uf in ufs:
-        parts.append(
-            f"CREATE TABLE estabelecimentos_{uf} PARTITION OF estabelecimentos FOR VALUES IN ('{uf}');"
+        stmt = sql.SQL(
+            "CREATE TABLE {part} PARTITION OF {parent} FOR VALUES IN ({uf})"
+        ).format(
+            part=sql.Identifier(f"estabelecimentos_{uf}"),
+            parent=sql.Identifier("estabelecimentos"),
+            uf=sql.Literal(uf),
         )
-    parts.append("CREATE TABLE estabelecimentos_default PARTITION OF estabelecimentos DEFAULT;")
-    sql = ddl_parent + "\n".join(parts)
+        parts.append(stmt.as_string(conn))
+    parts.append(
+        sql.SQL(
+            "CREATE TABLE {part} PARTITION OF {parent} DEFAULT"
+        ).format(
+            part=sql.Identifier("estabelecimentos_default"),
+            parent=sql.Identifier("estabelecimentos"),
+        ).as_string(conn)
+    )
+    full_sql = ddl_parent + "\n".join(parts)
     with conn.cursor() as cursor:
-        cursor.execute(sql)
+        cursor.execute(full_sql)
     conn.commit()
 
 
