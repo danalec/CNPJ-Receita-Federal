@@ -1,4 +1,5 @@
 import zipfile
+import os
 from pathlib import Path
 from itertools import groupby
 from typing import List, Iterator, Tuple
@@ -61,8 +62,9 @@ def extract_single_zip(zip_path: Path, destination_dir: Path):
                 target_path = (destination_dir / member_path).resolve()
                 base_dir = destination_dir.resolve()
                 try:
-                    # Garantir que o caminho alvo permaneça dentro do destino
-                    if not str(target_path).startswith(str(base_dir)):
+                    base_str = str(base_dir)
+                    target_str = str(target_path)
+                    if os.path.commonpath([base_str, target_str]) != base_str:
                         logging.warning(
                             f"   ~ Ignorando entrada potencialmente maliciosa: {member.filename}"
                         )
