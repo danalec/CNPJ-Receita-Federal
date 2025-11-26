@@ -136,9 +136,9 @@ def validate_chunk(config_name, chunk_df, conn):
 
 
 def sanitize_dates(df, date_columns):
-    for col in date_columns:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce")
+    cols = [c for c in date_columns if c in df.columns]
+    if cols:
+        df[cols] = df[cols].apply(lambda s: pd.to_datetime(s, format="%Y%m%d", errors="coerce"))
     return df
 
 
