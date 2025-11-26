@@ -352,7 +352,7 @@ def run_loader():
         for config_name in processing_order:
             process_and_load_file(conn, config_name)
 
-        if settings.set_unlogged_before_copy:
+        if settings.set_logged_after_copy:
             logger.info("Tornando tabelas persistentes (LOGGED) novamente...")
 
             tables = [
