@@ -45,7 +45,7 @@ def fast_load_chunk(conn, df, table_name):
                 cols=sql.SQL(", ").join(ident_cols),
             )
             csv_bytes = output.getvalue().encode("utf-8")
-            with cursor.copy(copy_stmt.as_string(conn)) as cp:
+            with cursor.copy(copy_stmt.as_string(cursor)) as cp:
                 cp.write(csv_bytes)
 
         # O commit é feito no nível superior (loop de processamento)

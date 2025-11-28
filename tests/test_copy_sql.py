@@ -23,6 +23,7 @@ class DummyCursor:
     def __init__(self):
         self.last_sql = None
         self.last_len = 0
+        self.connection = object()
 
     def copy(self, sql):
         return DummyCopy(self, sql)

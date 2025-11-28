@@ -8,7 +8,7 @@ from src.consolidate_csv import run_consolidation
 from src.database_loader import run_loader, run_queries_in_dir
 from src.settings import setup_logging, settings
 from src.check_update import check_updates, update_local_version
-from src.state import start_run, mark_stage, get_run_for_date, print_status
+from src.state import start_run, mark_stage, print_status
 
 setup_logging()
 logger = logging.getLogger(__name__)
