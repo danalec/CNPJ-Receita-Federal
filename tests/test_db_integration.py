@@ -14,12 +14,12 @@ def _should_run_integration() -> bool:
 
 @pytest.mark.skipif(not _should_run_integration(), reason="Integration tests disabled")
 def test_psycopg_copy_into_temp_table():
-    import psycopg
+    import psycopg2
     from src.database_loader import fast_load_chunk
 
     df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
 
-    with psycopg.connect(settings.database_uri) as conn:
+    with psycopg2.connect(settings.database_uri) as conn:
         with conn.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS etl_test")
             cur.execute("CREATE UNLOGGED TABLE etl_test (a INT, b INT)")
