@@ -25,11 +25,11 @@ class Settings(BaseSettings):
     # Default vazio ou uma data específica se for rodar manual
     target_date: str = ""
 
-    postgres_user: str
-    postgres_password: str
-    postgres_host: str
-    postgres_port: int
-    postgres_database: str
+    postgres_user: str = "postgres"
+    postgres_password: str = "postgres"
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_database: str = "cnpj"
 
     """
     Configurações de Download
