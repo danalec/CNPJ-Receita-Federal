@@ -20,11 +20,11 @@ class EstabelecimentosSchema(pa.SchemaModel):
     identificador_matriz_filial: Series[pd.Int64Dtype]
     nome_fantasia: Series[str]
     situacao_cadastral: Series[pd.Int64Dtype]
-    data_situacao_cadastral: Series[pd.DatetimeTZDtype] | Series[pd.DatetimeIndex]
+    data_situacao_cadastral: Series[object]
     motivo_situacao_cadastral: Series[pd.Int64Dtype]
     nome_cidade_exterior: Series[str]
     pais_codigo: Series[pd.Int64Dtype]
-    data_inicio_atividade: Series[pd.DatetimeTZDtype] | Series[pd.DatetimeIndex]
+    data_inicio_atividade: Series[object]
     cnae_fiscal_principal_codigo: Series[pd.Int64Dtype]
     cnae_fiscal_secundaria: Series[str]
     tipo_logradouro: Series[str]
@@ -43,7 +43,7 @@ class EstabelecimentosSchema(pa.SchemaModel):
     fax: Series[str]
     correio_eletronico: Series[str]
     situacao_especial: Series[str]
-    data_situacao_especial: Series[pd.DatetimeTZDtype] | Series[pd.DatetimeIndex]
+    data_situacao_especial: Series[object]
 
 
 class SociosSchema(pa.SchemaModel):
@@ -52,7 +52,7 @@ class SociosSchema(pa.SchemaModel):
     nome_socio_ou_razao_social: Series[str]
     cnpj_cpf_socio: Series[str]
     qualificacao_socio_codigo: Series[pd.Int64Dtype]
-    data_entrada_sociedade: Series[pd.DatetimeTZDtype] | Series[pd.DatetimeIndex]
+    data_entrada_sociedade: Series[object]
     pais_codigo: Series[pd.Int64Dtype]
     representante_legal_cpf: Series[str]
     nome_representante_legal: Series[str]
@@ -63,11 +63,11 @@ class SociosSchema(pa.SchemaModel):
 class SimplesSchema(pa.SchemaModel):
     cnpj_basico: Series[str]
     opcao_pelo_simples: Series[str]
-    data_opcao_pelo_simples: Series[pd.DatetimeTZDtype] | Series[pd.DatetimeIndex]
-    data_exclusao_do_simples: Series[pd.DatetimeTZDtype] | Series[pd.DatetimeIndex]
+    data_opcao_pelo_simples: Series[object]
+    data_exclusao_do_simples: Series[object]
     opcao_pelo_mei: Series[str]
-    data_opcao_pelo_mei: Series[pd.DatetimeTZDtype] | Series[pd.DatetimeIndex]
-    data_exclusao_do_mei: Series[pd.DatetimeTZDtype] | Series[pd.DatetimeIndex]
+    data_opcao_pelo_mei: Series[object]
+    data_exclusao_do_mei: Series[object]
 
 
 def validate(config_name: str, df: pd.DataFrame) -> pd.DataFrame:
