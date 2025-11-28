@@ -66,3 +66,48 @@ jobs:
           tags: cnpj-receita-federal:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: cnpj
+          POSTGRES_PASSWORD: cnpj
+          POSTGRES_DB: cnpj
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cnpj -d cnpj"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+      - name: Wait for Postgres
+        run: |
+          for i in {1..10}; do
+            pg_isready -h 127.0.0.1 -p 5432 -U cnpj -d cnpj && break
+            sleep 3
+          done
+      - name: Run integration tests
+        env:
+          PG_INTEGRATION: "1"
+          POSTGRES_USER: cnpj
+          POSTGRES_PASSWORD: cnpj
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: 5432
+          POSTGRES_DATABASE: cnpj
+        run: pytest -q -m integration --maxfail=1 --disable-warnings
