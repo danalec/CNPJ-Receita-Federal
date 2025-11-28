@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     extract_workers: int = 2
     # Tamanho do pedaço lido na memória durante download (8KB)
     download_chunk_size: int = 8192
+    rate_limit_per_sec: int = 0
+    verify_zip_integrity: bool = True
 
     """
     O script por padrão desativa o log de transação (WAL) 

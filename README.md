@@ -95,7 +95,14 @@ CHUNK_SIZE=200_000
 
 # Logging configuration
 LOG_LEVEL=INFO
+RATE_LIMIT_PER_SEC=0
+VERIFY_ZIP_INTEGRITY=true
 ```
+
+### Notas de Performance e Robustez
+
+- Dependências são instaladas via `requirements.txt` e `requirements-dev.txt` para evitar divergência entre CI e Docker.
+- Downloads podem ser limitados por taxa definindo `RATE_LIMIT_PER_SEC` (>0) e são verificados com integridade de ZIP.
 
 ## 📊 Diagrama do Banco de Dados (ER)
 

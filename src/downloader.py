@@ -5,7 +5,9 @@ from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from tqdm import tqdm  # Barra de progresso
+from tqdm import tqdm
+import zipfile
+import time
 
 # Importa as configurações
 from .settings import settings
@@ -113,6 +115,21 @@ def download_file(url: str, dest_dir: Path):
                     if chunk:
                         size = f.write(chunk)
                         bar.update(size)
+                        if settings.rate_limit_per_sec and settings.rate_limit_per_sec > 0:
+                            time.sleep(size / settings.rate_limit_per_sec)
+
+        if settings.verify_zip_integrity and filename.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(dest_path) as z:
+                    bad = z.testzip()
+                    if bad is not None:
+                        dest_path.unlink(missing_ok=True)
+                        logger.error(f"Arquivo corrompido: {filename}")
+                        return False
+            except Exception:
+                dest_path.unlink(missing_ok=True)
+                logger.error(f"Falha ao validar zip: {filename}")
+                return False
 
         logger.info(f"Download concluído: {filename}")
         return True
