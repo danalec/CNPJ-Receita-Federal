@@ -70,6 +70,7 @@ class Settings(BaseSettings):
 
     # Set log level
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    strict_fk_validation: bool = True
 
     @computed_field
     def download_url(self) -> str:

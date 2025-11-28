@@ -81,7 +81,7 @@ UF_SET = {
 }
 
 
-def _ensure_domains_loaded(conn, domains):
+def _ensure_domains_loaded(conn, domains, strict):
     with conn.cursor() as cursor:
         for tbl in domains:
             cursor.execute(
@@ -89,54 +89,67 @@ def _ensure_domains_loaded(conn, domains):
             )
             cnt = cursor.fetchone()[0]
             if cnt == 0:
-                raise RuntimeError(f"Tabela de domínio '{tbl}' ainda não carregada. Ajuste a ordem ou remova filtros --only/--exclude.")
+                if strict:
+                    raise RuntimeError(f"Tabela de domínio '{tbl}' ainda não carregada. Ajuste a ordem ou remova filtros --only/--exclude.")
+                else:
+                    logger.warning(f"Tabela de domínio '{tbl}' vazia. Validação de FK será relaxada.")
 
 
-def _validate_fk_set(df, column, valid_set, label):
+def _validate_fk_set(df, column, valid_set, label, strict):
     vals = set(df[column].dropna().unique()) if column in df.columns else set()
     missing = vals - valid_set
     if missing:
-        sample = list(missing)[:10]
-        raise ValueError(f"Valores inválidos em '{label}': {sample} (total {len(missing)}). Garanta que a tabela de domínio está carregada e os códigos são válidos.")
+        if strict:
+            sample = list(missing)[:10]
+            raise ValueError(f"Valores inválidos em '{label}': {sample} (total {len(missing)}). Garanta que a tabela de domínio está carregada e os códigos são válidos.")
+        else:
+            mask = df[column].isin(valid_set) if column in df.columns else None
+            if mask is not None:
+                df.loc[~mask, column] = pd.NA
+            logger.warning(f"Valores inválidos em '{label}' foram definidos como nulos. Total {len(missing)}.")
 
 
 def validate_chunk(config_name, chunk_df, conn):
     if config_name == "empresas":
-        _ensure_domains_loaded(conn, ["naturezas_juridicas", "qualificacoes_socios"])
+        _ensure_domains_loaded(conn, ["naturezas_juridicas", "qualificacoes_socios"], settings.strict_fk_validation)
         nat = _get_domain_set(conn, "naturezas_juridicas", "codigo")
         qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
         if "natureza_juridica_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "natureza_juridica_codigo", nat, "natureza_juridica_codigo")
+            _validate_fk_set(chunk_df, "natureza_juridica_codigo", nat, "natureza_juridica_codigo", settings.strict_fk_validation)
         if "qualificacao_responsavel" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "qualificacao_responsavel", qual, "qualificacao_responsavel")
+            _validate_fk_set(chunk_df, "qualificacao_responsavel", qual, "qualificacao_responsavel", settings.strict_fk_validation)
     elif config_name == "estabelecimentos":
-        _ensure_domains_loaded(conn, ["paises", "municipios", "cnaes", "empresas"])
+        _ensure_domains_loaded(conn, ["paises", "municipios", "cnaes", "empresas"], settings.strict_fk_validation)
         paises = _get_domain_set(conn, "paises", "codigo")
         municipios = _get_domain_set(conn, "municipios", "codigo")
         cnaes = _get_domain_set(conn, "cnaes", "codigo")
         if "pais_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo")
+            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo", settings.strict_fk_validation)
         if "municipio_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "municipio_codigo", municipios, "municipio_codigo")
+            _validate_fk_set(chunk_df, "municipio_codigo", municipios, "municipio_codigo", settings.strict_fk_validation)
         if "cnae_fiscal_principal_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "cnae_fiscal_principal_codigo", cnaes, "cnae_fiscal_principal_codigo")
+            _validate_fk_set(chunk_df, "cnae_fiscal_principal_codigo", cnaes, "cnae_fiscal_principal_codigo", settings.strict_fk_validation)
         if "uf" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "uf", UF_SET, "uf")
+            _validate_fk_set(chunk_df, "uf", UF_SET, "uf", settings.strict_fk_validation)
         if "cnae_fiscal_secundaria" in chunk_df.columns:
             s = chunk_df["cnae_fiscal_secundaria"].dropna().astype(str)
             bad = ~((s.str.startswith("{") & s.str.endswith("}")) | (s == ""))
             if bad.any():
-                raise ValueError("Campo cnae_fiscal_secundaria com formato inválido em algumas linhas. Esperado texto de array PostgreSQL: '{...}'.")
+                if settings.strict_fk_validation:
+                    raise ValueError("Campo cnae_fiscal_secundaria com formato inválido em algumas linhas. Esperado texto de array PostgreSQL: '{...}'.")
+                else:
+                    chunk_df.loc[bad.index[bad], "cnae_fiscal_secundaria"] = None
+                    logger.warning("Valores inválidos em cnae_fiscal_secundaria foram definidos como nulos.")
     elif config_name == "socios":
-        _ensure_domains_loaded(conn, ["paises", "qualificacoes_socios", "empresas"])
+        _ensure_domains_loaded(conn, ["paises", "qualificacoes_socios", "empresas"], settings.strict_fk_validation)
         paises = _get_domain_set(conn, "paises", "codigo")
         qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
         if "pais_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo")
+            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo", settings.strict_fk_validation)
         if "qualificacao_socio_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "qualificacao_socio_codigo", qual, "qualificacao_socio_codigo")
+            _validate_fk_set(chunk_df, "qualificacao_socio_codigo", qual, "qualificacao_socio_codigo", settings.strict_fk_validation)
         if "qualificacao_representante_legal_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "qualificacao_representante_legal_codigo", qual, "qualificacao_representante_legal_codigo")
+            _validate_fk_set(chunk_df, "qualificacao_representante_legal_codigo", qual, "qualificacao_representante_legal_codigo", settings.strict_fk_validation)
 
 
 def sanitize_dates(df, date_columns):
