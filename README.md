@@ -104,6 +104,11 @@ VERIFY_ZIP_INTEGRITY=true
 - Dependências são instaladas via `requirements.txt` e `requirements-dev.txt` para evitar divergência entre CI e Docker.
 - Downloads podem ser limitados por taxa definindo `RATE_LIMIT_PER_SEC` (>0) e são verificados com integridade de ZIP.
 
+### Testes
+
+- Unitários: `pytest -q` (CI executa com cobertura).
+- Integração (opcional, requer Postgres): defina `PG_INTEGRATION=1` e variáveis de DB no `.env`, então rode `pytest -q -m integration`.
+
 ## 📊 Diagrama do Banco de Dados (ER)
 
 Também pode ser visualizado em um PDF direto no [Site da receita](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf)
