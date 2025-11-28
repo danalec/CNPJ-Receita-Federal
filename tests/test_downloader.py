@@ -83,7 +83,7 @@ def test_download_rate_limit_sleep(tmp_path, monkeypatch):
     def fake_sleep(s):
         calls.append(s)
 
-    monkeypatch.setattr("time.sleep", fake_sleep)
+    monkeypatch.setattr("src.downloader.time.sleep", fake_sleep, raising=False)
     url = "http://example.com/file.bin"
     ok = download_file(url, Path(tmp_path))
     assert ok
