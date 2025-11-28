@@ -11,7 +11,7 @@ from .settings import settings
 logger = logging.getLogger("updater")
 
 
-def get_latest_remote_date() -> str:
+def get_latest_remote_date() -> Optional[str]:
     """
     Acessa o site da Receita e descobre qual é a pasta de data mais recente.
     Retorna uma string ex: '2025-11'

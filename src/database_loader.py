@@ -5,6 +5,7 @@ import re
 import psycopg
 from psycopg import sql
 from pathlib import Path
+from typing import Dict, Tuple, Set, Union
 from .settings import settings
 from .validation import validate as schema_validate
 
@@ -37,15 +38,12 @@ def fast_load_chunk(conn, df, table_name):
     # Usa um cursor para executar o COPY
     try:
         with conn.cursor() as cursor:
-            ident_cols = [sql.Identifier(c) for c in columns]
-            copy_stmt = sql.SQL(
-                "COPY {table} ({cols}) FROM STDIN WITH (FORMAT CSV, DELIMITER ';', NULL '', QUOTE '\"', HEADER FALSE)"
-            ).format(
-                table=sql.Identifier(table_name),
-                cols=sql.SQL(", ").join(ident_cols),
+            cols_str = ", ".join(columns)
+            copy_sql = (
+                f"COPY {table_name} ({cols_str}) FROM STDIN WITH (FORMAT CSV, DELIMITER ';', NULL '', QUOTE '"' , HEADER FALSE)"
             )
             csv_bytes = output.getvalue().encode("utf-8")
-            with cursor.copy(copy_stmt.as_string(cursor)) as cp:
+            with cursor.copy(copy_sql) as cp:
                 cp.write(csv_bytes)
 
         # O commit é feito no nível superior (loop de processamento)
@@ -59,7 +57,7 @@ def fast_load_chunk(conn, df, table_name):
         raise
 
 
-DOMAIN_CACHE = {}
+DOMAIN_CACHE: Dict[Tuple[str, str], Set[Union[int, str]]] = {}
 
 
 def _get_domain_set(conn, table, column):
