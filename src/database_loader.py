@@ -40,7 +40,7 @@ def fast_load_chunk(conn, df, table_name):
         with conn.cursor() as cursor:
             cols_str = ", ".join(columns)
             copy_sql = (
-                f"COPY {table_name} ({cols_str}) FROM STDIN WITH (FORMAT CSV, DELIMITER ';', NULL '', QUOTE '"' , HEADER FALSE)"
+                f"COPY {table_name} ({cols_str}) FROM STDIN WITH (FORMAT CSV, DELIMITER ';', NULL '', QUOTE '\"', HEADER FALSE)"
             )
             csv_bytes = output.getvalue().encode("utf-8")
             with cursor.copy(copy_sql) as cp:
