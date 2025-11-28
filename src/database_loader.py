@@ -2,8 +2,8 @@ import pandas as pd
 import logging
 import io
 import re
-import psycopg2
-from psycopg2 import sql
+import psycopg
+from psycopg import sql
 from pathlib import Path
 from .settings import settings
 from .validation import validate as schema_validate
@@ -44,7 +44,9 @@ def fast_load_chunk(conn, df, table_name):
                 table=sql.Identifier(table_name),
                 cols=sql.SQL(", ").join(ident_cols),
             )
-            cursor.copy_expert(copy_stmt.as_string(conn), output)
+            csv_bytes = output.getvalue().encode("utf-8")
+            bio = io.BytesIO(csv_bytes)
+            cursor.copy(copy_stmt.as_string(conn), source=bio)
 
         # O commit é feito no nível superior (loop de processamento)
         # para evitar commit a cada chunk pequeno se desejar,
@@ -447,7 +449,7 @@ def execute_sql_path(conn, path: Path):
 
 def run_queries_in_dir(dir_path: Path):
     try:
-        conn = psycopg2.connect(settings.database_uri)
+        conn = psycopg.connect(settings.database_uri)
     except Exception as e:
         logger.error(f"Erro ao conectar no banco: {e}")
         return
@@ -535,7 +537,7 @@ def run_loader(only=None, exclude=None):
 
     # Conexão direta via psycopg2
     try:
-        conn = psycopg2.connect(settings.database_uri)
+        conn = psycopg.connect(settings.database_uri)
     except Exception as e:
         logger.error(f"Erro ao conectar no banco: {e}")
         return
