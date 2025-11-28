@@ -63,7 +63,7 @@ def download_file(url: str, dest_dir: Path):
     """
     filename = url.split("/")[-1]
     dest_path = dest_dir / filename
-    download_chunck_size = settings.download_chunk_size
+    download_chunk_size = settings.download_chunk_size
 
     session = get_session()
 
@@ -109,7 +109,7 @@ def download_file(url: str, dest_dir: Path):
                     initial=initial,
                 ) as bar,
             ):
-                for chunk in r.iter_content(chunk_size=download_chunck_size):
+                for chunk in r.iter_content(chunk_size=download_chunk_size):
                     if chunk:
                         size = f.write(chunk)
                         bar.update(size)
