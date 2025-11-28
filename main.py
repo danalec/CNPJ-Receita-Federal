@@ -25,6 +25,12 @@ def cmd_check(args):
 
 
 def cmd_download(args):
+    if getattr(args, "rate_limit_per_sec", None) is not None:
+        settings.rate_limit_per_sec = int(args.rate_limit_per_sec)
+    if getattr(args, "skip_zip_verify", False):
+        settings.verify_zip_integrity = False
+    if getattr(args, "max_workers", None) is not None:
+        settings.max_workers = int(args.max_workers)
     run_download()
     if settings.target_date:
         mark_stage(settings.target_date, "download", "completed")
@@ -54,6 +60,12 @@ def cmd_load(args):
 
 def cmd_full(args):
     start = time.time()
+    if getattr(args, "rate_limit_per_sec", None) is not None:
+        settings.rate_limit_per_sec = int(args.rate_limit_per_sec)
+    if getattr(args, "skip_zip_verify", False):
+        settings.verify_zip_integrity = False
+    if getattr(args, "max_workers", None) is not None:
+        settings.max_workers = int(args.max_workers)
     date = check_updates(skip_clean=args.resume)
     if date is None and not args.resume:
         logger.info("Dados já estão atualizados.")
@@ -100,6 +112,9 @@ def build_parser():
     p_check = sub.add_parser("check")
     p_check.set_defaults(func=cmd_check)
     p_download = sub.add_parser("download")
+    p_download.add_argument("--rate-limit-per-sec", type=int)
+    p_download.add_argument("--skip-zip-verify", action="store_true")
+    p_download.add_argument("--max-workers", type=int)
     p_download.set_defaults(func=cmd_download)
     p_extract = sub.add_parser("extract")
     p_extract.set_defaults(func=cmd_extract)
@@ -118,6 +133,9 @@ def build_parser():
     p_full.add_argument("--exclude", nargs="*")
     p_full.add_argument("--run-queries", action="store_true")
     p_full.add_argument("--delete-sources", action="store_true")
+    p_full.add_argument("--rate-limit-per-sec", type=int)
+    p_full.add_argument("--skip-zip-verify", action="store_true")
+    p_full.add_argument("--max-workers", type=int)
     p_full.set_defaults(func=cmd_full)
     p_queries = sub.add_parser("queries")
     p_queries.set_defaults(func=lambda a: run_queries_in_dir(settings.queries_dir))
