@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import computed_field
 
@@ -25,11 +25,11 @@ class Settings(BaseSettings):
     # Default vazio ou uma data específica se for rodar manual
     target_date: str = ""
 
-    postgres_user: str = "postgres"
-    postgres_password: str = "postgres"
-    postgres_host: str = "localhost"
-    postgres_port: int = 5432
-    postgres_database: str = "cnpj"
+    postgres_user: Optional[str] = None
+    postgres_password: Optional[str] = None
+    postgres_host: Optional[str] = None
+    postgres_port: Optional[int] = None
+    postgres_database: Optional[str] = None
 
     """
     Configurações de Download
@@ -105,12 +105,18 @@ class Settings(BaseSettings):
 
     @computed_field
     def database_uri(self) -> str:
+        if not all(
+            [
+                self.postgres_user,
+                self.postgres_password,
+                self.postgres_host,
+                self.postgres_port,
+                self.postgres_database,
+            ]
+        ):
+            return ""
         return (
-            f"postgresql://{self.postgres_user}"
-            f":{self.postgres_password}"
-            f"@{self.postgres_host}"
-            f":{self.postgres_port}"
-            f"/{self.postgres_database}"
+            f"postgresql://{self.postgres_user}:{self.postgres_password}@{self.postgres_host}:{self.postgres_port}/{self.postgres_database}"
         )
 
     def create_dirs(self):
