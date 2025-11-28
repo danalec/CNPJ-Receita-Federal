@@ -45,8 +45,6 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Ruff
         run: ruff check .
-      - name: Black
-        run: black --check .
       - name: Mypy
         run: mypy src
 

@@ -1,5 +1,3 @@
-import io
-import types
 import pandas as pd
 
 from src.database_loader import fast_load_chunk

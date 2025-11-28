@@ -1,6 +1,5 @@
 import io
 import zipfile
-import types
 from pathlib import Path
 
 from src.settings import settings
@@ -83,7 +82,8 @@ def test_download_rate_limit_sleep(tmp_path, monkeypatch):
     def fake_sleep(s):
         calls.append(s)
 
-    monkeypatch.setattr("src.downloader.time.sleep", fake_sleep, raising=False)
+    import src.downloader as dl
+    monkeypatch.setattr(dl.time, "sleep", fake_sleep)
     url = "http://example.com/file.bin"
     ok = download_file(url, Path(tmp_path))
     assert ok
