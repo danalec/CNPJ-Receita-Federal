@@ -393,10 +393,22 @@ def execute_sql_file(conn, filename):
         sql_content = sql_content.replace("CREATE UNLOGGED TABLE", "CREATE TABLE")
 
     try:
-        with conn.cursor() as cursor:
-            cursor.execute(sql_content)
-        conn.commit()  # Confirma as alterações do DDL
-        logger.info(f"Sucesso ao executar {filename}")
+        if "CONCURRENTLY" in sql_content:
+            old_autocommit = conn.autocommit
+            try:
+                conn.autocommit = True
+                statements = [s.strip() for s in sql_content.split(";") if s.strip()]
+                for stmt in statements:
+                    with conn.cursor() as cursor:
+                        cursor.execute(stmt)
+                logger.info(f"Sucesso ao executar {filename}")
+            finally:
+                conn.autocommit = old_autocommit
+        else:
+            with conn.cursor() as cursor:
+                cursor.execute(sql_content)
+            conn.commit()
+            logger.info(f"Sucesso ao executar {filename}")
     except Exception as e:
         conn.rollback()
         logger.error(f"ERRO ao executar SQL de {filename}: {e}")

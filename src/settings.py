@@ -7,7 +7,10 @@ from pydantic import computed_field
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        case_sensitive=False,
     )
 
     # Sobe 2 níveis para chegar na raiz do projeto (source/config.py)
