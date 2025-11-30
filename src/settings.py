@@ -1,8 +1,39 @@
+import json
 import logging
 from pathlib import Path
-from typing import Literal
+
+from typing import Literal, Dict, Optional
+from enum import Enum
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import computed_field
+
+
+def setup_logging():
+    log_file = settings.log_dir / "cnpj.log"
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level),
+        format="%(levelname)s - %(asctime)s - [%(name)s] - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.FileHandler(log_file, mode="w"),
+            logging.StreamHandler(),
+        ],
+    )
+
+
+class PipelineStep(str, Enum):
+    CHECK = "check"
+    DOWNLOAD = "download"
+    EXTRACT = "extract"
+    CONSOLIDATE = "consolidate"
+    LOAD = "load"
+    CONSTRAINTS = "constraints"
+
+
+class StepStatus(str, Enum):
+    COMPLETED = "completed"
+    FAILED = "failed"
+    RUNNING = "running"
 
 
 class Settings(BaseSettings):
@@ -28,9 +59,7 @@ class Settings(BaseSettings):
     postgres_port: int
     postgres_database: str
 
-    """
-    Configurações de Download
-    """
+    # Configurações de Download e Extração
 
     # Número de downloads simultâneos (não exagere para não tomar block)
     max_workers: int = 4
@@ -51,7 +80,9 @@ class Settings(BaseSettings):
     set_logged_after_copy: bool = False
     use_unlogged: bool = True
     cluster_after_copy: bool = False
-    partition_estabelecimentos_by: Literal["none", "uf"] = "none"
+    skip_constraints: bool = False
+
+    # Lógicas de tratamento de texto
     normalize_line_endings: bool = True
     strip_bom: bool = True
 
@@ -74,10 +105,6 @@ class Settings(BaseSettings):
         if not self.target_date:
             return ""
         return f"{self.rfb_base_url}{self.target_date}/"
-
-    @computed_field
-    def state_file(self) -> Path:
-        return self.data_dir / "last_version_processed.txt"
 
     @computed_field
     def data_dir(self) -> Path:
@@ -111,29 +138,111 @@ class Settings(BaseSettings):
 
     def create_dirs(self):
         """Garante que a estrutura de pastas exista."""
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.compressed_dir.mkdir(parents=True, exist_ok=True)
-        self.extracted_dir.mkdir(parents=True, exist_ok=True)
-        self.queries_dir.mkdir(parents=True, exist_ok=True)
+        dirs = [
+            self.data_dir,
+            self.compressed_dir,
+            self.extracted_dir,
+            self.queries_dir,
+            self.log_dir,
+        ]
+        for p in dirs:
+            p.mkdir(parents=True, exist_ok=True)
 
 
-# Instancia e cria diretórios
+class ProcessState:
+    def __init__(self, data_dir: Path):
+        self.file_path = data_dir / "state.json"
+        self.data = self._load()
+
+    def _load(self) -> Dict:
+        """Carrega o JSON. Retorna vazio se não existir."""
+        if not self.file_path.exists():
+            return {}
+        try:
+            return json.loads(self.file_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+
+    def _save(self):
+        """Persiste o estado atual no disco."""
+        self.file_path.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+
+    @property
+    def target_date(self) -> Optional[str]:
+        return self.data.get("target_date")
+
+    @property
+    def current_status(self) -> Optional[str]:
+        return self.data.get("status")
+
+    @property
+    def current_state(self) -> Optional[str]:
+        return self.data.get("stage")
+
+    @target_date.setter
+    def target_date(self, value: str):
+        """Define a data alvo. Reseta o estágio para None se a data mudar."""
+        current = self.data.get("target_date")
+        if value != current:
+            self.data = {"target_date": value, "stage": None, "status": None}
+            self._save()
+
+    def update(self, step: PipelineStep, status: StepStatus):
+        """
+        Atualiza o estágio atual e seu status.
+        Ex: stage='download', status='completed'
+        """
+        self.data["stage"] = step.value
+        self.data["status"] = status.value
+        self._save()
+
+    def should_skip(self, current_step: PipelineStep) -> bool:
+        """
+        Verifica se deve pular a etapa atual baseada no histórico salvo.
+        Retorna True se a etapa já foi concluída ou superada.
+        """
+
+        if not self.target_date:
+            return False
+
+        saved_stage = self.data.get("stage")
+        saved_status = self.data.get("status")
+
+        if not saved_stage:
+            return False
+
+        # Define a ordem exata de execução
+        # (Isso precisa bater com a ordem do PipelineStep Enum na main)
+        order = [
+            PipelineStep.CHECK.value,
+            PipelineStep.DOWNLOAD.value,
+            PipelineStep.EXTRACT.value,
+            PipelineStep.CONSOLIDATE.value,
+            PipelineStep.LOAD.value,
+            PipelineStep.CONSTRAINTS.value,
+        ]
+
+        try:
+            current_index = order.index(current_step.value)
+            saved_index = order.index(saved_stage)
+        except ValueError:
+            # Se tiver algum valor estranho no JSON, não pula por segurança
+            return False
+
+        # Se a etapa salva é SUPERIOR a atual (ex: Salvo=Load, Atual=Download) -> PULA
+        if saved_index > current_index:
+            return True
+
+        # Se é a MESMA etapa e está COMPLETED -> PULA
+        if saved_index == current_index and saved_status == StepStatus.COMPLETED.value:
+            return True
+
+        return False
+
+
+# --- Instanciação Global ---
 settings = Settings()
 settings.create_dirs()
 
-
-def setup_logging():
-    """Configura o logger raiz."""
-    log_file = settings.log_dir / "cnpj.log"
-    level = getattr(logging, settings.log_level)
-
-    logging.basicConfig(
-        level=level,
-        format="%(levelname)s - %(asctime)s - [%(name)s] - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.FileHandler(log_file, mode="w"),
-            logging.StreamHandler(),
-        ],
-    )
+# Instância única do Estado
+state = ProcessState(settings.data_dir)
