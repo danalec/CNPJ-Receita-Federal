@@ -24,14 +24,14 @@ ALTER TABLE simples ADD PRIMARY KEY (cnpj_basico);
 
 -- Sócios não tem PK simples garantida (mesmo sócio em várias empresas ou identificador repetido).
 -- Criamos índices para performance de busca.
-CREATE INDEX CONCURRENTLY idx_socios_cnpj_basico ON socios (cnpj_basico);
-CREATE INDEX CONCURRENTLY idx_socios_nome ON socios (nome_socio_ou_razao_social);
-CREATE INDEX CONCURRENTLY idx_socios_cpf_cnpj ON socios (cnpj_cpf_socio);
+CREATE INDEX idx_socios_cnpj_basico ON socios (cnpj_basico);
+CREATE INDEX idx_socios_nome ON socios (nome_socio_ou_razao_social);
+CREATE INDEX idx_socios_cpf_cnpj ON socios (cnpj_cpf_socio);
 
 -- Índices adicionais úteis para buscas comuns
-CREATE INDEX CONCURRENTLY idx_estabelecimentos_uf ON estabelecimentos (uf);
-CREATE INDEX CONCURRENTLY idx_estabelecimentos_cnae ON estabelecimentos (cnae_fiscal_principal_codigo);
-CREATE INDEX CONCURRENTLY idx_empresas_razao_social ON empresas (razao_social);
+CREATE INDEX idx_estabelecimentos_uf ON estabelecimentos (uf);
+CREATE INDEX idx_estabelecimentos_cnae ON estabelecimentos (cnae_fiscal_principal_codigo);
+CREATE INDEX idx_empresas_razao_social ON empresas (razao_social);
 
 -- 3. CHAVES ESTRANGEIRAS (FKs)
 
