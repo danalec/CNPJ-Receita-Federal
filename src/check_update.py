@@ -1,11 +1,12 @@
 import requests
 import logging
 import shutil
+import sys
 from typing import Optional
 from bs4 import BeautifulSoup
 import re
 
-from .settings import settings
+from .settings import settings, state, StepStatus, PipelineStep
 
 # Configura logger local para este script
 logger = logging.getLogger("updater")
@@ -46,20 +47,6 @@ def get_latest_remote_date() -> str:
         return None
 
 
-def get_local_version() -> Optional[str]:
-    """Lê a última versão processada do arquivo de estado."""
-    state_file = settings.state_file
-
-    if state_file.exists():
-        return state_file.read_text().strip()
-    return None
-
-
-def update_local_version(version) -> None:
-    """Salva a nova versão no arquivo de estado."""
-    settings.state_file.write_text(version)
-
-
 def clean_data_dirs() -> None:
     """
     Limpa as pastas de dados antigos antes de baixar os novos.
@@ -85,15 +72,19 @@ def clean_data_dirs() -> None:
     logger.info("Diretórios limpos.")
 
 
-def check_updates(skip_clean: bool = False) -> Optional[str]:
+def check_updates() -> Optional[str]:
     logger.info("Verificando atualizações na Receita Federal...")
 
     latest_remote = get_latest_remote_date()
-    last_processed = get_local_version()
+    # Leitura correta do estado persistido
+    last_processed = state.target_date
 
     if not latest_remote:
         logger.error("Não foi possível determinar a versão remota. Abortando.")
-        return None
+        raise RuntimeError(
+            "Falha crítica: Não foi possível obter a última "
+            "versão no site da Receita Federal."
+        )
 
     logger.info(f"Última versão disponível: {latest_remote}")
     logger.info(f"Última versão processada: {last_processed}")
@@ -103,14 +94,45 @@ def check_updates(skip_clean: bool = False) -> Optional[str]:
 
     logger.info(f"Nova versão encontrada: {latest_remote}. Iniciando atualização.")
 
-    # O settings.download_url se atualizará sozinho graças ao @computed_field
-    settings.target_date = latest_remote
+    # Ao definir isso, o setter do state já reseta os passos anteriores automaticamente.
+    state.target_date = latest_remote
 
-    if not skip_clean:
-        logger.info("Removendo arquivos antigos! Caso existam")
-        clean_data_dirs()
+    logger.info("Removendo arquivos antigos! Caso existam")
+    clean_data_dirs()
 
     return latest_remote
+
+
+def run_check_step() -> None:
+    """
+    Executa a verificação. Se achar nova versão, reseta o estado.
+    Se não achar e não tiver histórico, encerra o script.
+    """
+
+    new_date = check_updates()
+    # Runtime: Atualiza a configuração em memória para gerar a URL correta
+    settings.target_date = new_date
+
+    # Se tiver uma nova versão, começa um novo fluxo da primeira etapa
+    if new_date:
+        logger.info(f"📅 Nova versão detectada: {new_date}")
+
+        # Persistência: Salva no JSON (Isso reseta os steps também)
+        state.target_date = new_date
+
+    # Checa se o pipeline já não foi concluido por completo
+    elif (
+        state.current_state == PipelineStep.CONSTRAINTS
+        and state.current_status == StepStatus.COMPLETED.value
+    ):
+        logger.info(
+            f"✅ Versão {state.target_date} já processada por completo. Não há nada a fazer"
+        )
+        sys.exit(0)
+
+    # Continua de onde parou
+    else:
+        logger.info(f"🔄 Nenhuma novidade. Retomando versão: {state.target_date}")
 
 
 if __name__ == "__main__":
