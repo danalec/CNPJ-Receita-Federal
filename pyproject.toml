@@ -3,7 +3,7 @@ name = "cnpj-receita-federal"
 version = "0.1.0"
 description = ""
 authors = [
-    {name = "Folclore", email = "folclore@protonmail.com}
+    {name = "Folclore", email = "folclore@protonmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,7 +17,6 @@ dependencies = [
     "pandera[io] (>=0.20.3,<1.0.0)",
     "charset-normalizer (>=3.3.2,<4.0.0)"
 ]
-
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
