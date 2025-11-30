@@ -43,11 +43,19 @@ def get_zip_links(base_url: str) -> list[str]:
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
-        zip_urls = [
-            href if href.startswith("http") else f"{base_url.rstrip('/')}/{href}"
-            for a in soup.find_all("a")
-            if (href := a.get("href")) and href.lower().endswith(".zip")
-        ]
+        links = soup.find_all("a")
+
+        zip_urls = []
+        for link in links:
+            href = link.get("href")
+            # Filtra apenas arquivos .zip e ignora links de navegação
+            if href and href.lower().endswith(".zip"):
+                # Garante a URL completa
+                if not href.startswith("http"):
+                    full_url = f"{base_url.rstrip('/')}/{href}"
+                else:
+                    full_url = href
+                zip_urls.append(full_url)
 
         logger.info(f"Encontrados {len(zip_urls)} arquivos para baixar.")
         return zip_urls
