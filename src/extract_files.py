@@ -15,7 +15,7 @@ def get_file_base_name(path: Path) -> str:
     Extrai o nome base de um arquivo, removendo números e a extensão.
     Exemplo: "Empresas4.zip" -> "Empresas"
     """
-    base = ''.join(__import__('itertools').takewhile(str.isalpha, path.stem))
+    base = "".join(__import__("itertools").takewhile(str.isalpha, path.stem))
     return base or "desconhecido"
 
 
@@ -56,7 +56,7 @@ def extract_single_zip(zip_path: Path, destination_dir: Path):
             for member in zip_ref.infolist():
                 member_path = Path(member.filename)
                 if member_path.is_absolute():
-                    logging.warning(f"   ~ Ignorando entrada absoluta: {member.filename}")
+                    logging.warning(f"~ Ignorando entrada absoluta: {member.filename}")
                     continue
 
                 target_path = (destination_dir / member_path).resolve()
@@ -66,18 +66,23 @@ def extract_single_zip(zip_path: Path, destination_dir: Path):
                     target_str = str(target_path)
                     if os.path.commonpath([base_str, target_str]) != base_str:
                         logging.warning(
-                            f"   ~ Ignorando entrada potencialmente maliciosa: {member.filename}"
+                            f"~ Ignorando entrada potencialmente maliciosa: {member.filename}"
                         )
                         continue
                 except Exception:
-                    logging.warning(f"   ~ Ignorando entrada inválida: {member.filename}")
+                    logging.warning(
+                        f"   ~ Ignorando entrada inválida: {member.filename}"
+                    )
                     continue
 
                 if member.is_dir():
                     target_path.mkdir(parents=True, exist_ok=True)
                 else:
                     target_path.parent.mkdir(parents=True, exist_ok=True)
-                    with zip_ref.open(member, "r") as src, open(target_path, "wb") as dst:
+                    with (
+                        zip_ref.open(member, "r") as src,
+                        open(target_path, "wb") as dst,
+                    ):
                         dst.write(src.read())
 
     except zipfile.BadZipFile:
@@ -134,7 +139,10 @@ def run_extraction():
 
         files_list = list(files_iterator)
         with ThreadPoolExecutor(max_workers=settings.extract_workers) as executor:
-            futures = [executor.submit(extract_single_zip, fp, target_path) for fp in files_list]
+            futures = [
+                executor.submit(extract_single_zip, fp, target_path)
+                for fp in files_list
+            ]
             for _ in as_completed(futures):
                 pass
 
