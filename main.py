@@ -1,71 +1,72 @@
 import logging
+import argparse
+import sys
 import time
 
-from src.extract_files import run_extraction
-from src.downloader import run_download
-from src.consolidate_csv import run_consolidation
-from src.database_loader import run_loader
-from src.settings import setup_logging
-from src.check_update import check_updates, update_local_version
+# Imports do projeto
+from src import (
+    extract_files,
+    downloader,
+    consolidate_csv,
+    database_loader,
+    check_update,
+)
+from src.settings import setup_logging, state, PipelineStep, StepStatus
 
 setup_logging()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("orchestrator")
 
 
-def main_pipeline():
-    logging.info("==================================================")
-    logging.info("🚀 INICIANDO PIPELINE DE DADOS COMPLETO 🚀")
-    logging.info("==================================================")
+PIPELINE_MAP = {
+    PipelineStep.DOWNLOAD: downloader.run_download,
+    PipelineStep.EXTRACT: extract_files.run_extraction,
+    PipelineStep.CONSOLIDATE: consolidate_csv.run_consolidation,
+    PipelineStep.LOAD: database_loader.run_loader,
+    PipelineStep.CONSTRAINTS: database_loader.run_constraints,  #
+}
 
+
+def run_pipeline(force: bool = False):
     start_time = time.time()
+    logger.info("🚀 Iniciando Pipeline CNPJ...")
 
-    # --- VERIFICAÇÃO DA VERSÃO ---
-    logging.info("Verificando versão mais recente disponível...")
+    check_update.run_check_step()
 
-    # Retorna a data se tiver atualização, ou None se não tiver
-    new_version_date = check_updates()
+    for step_name, step_func in PIPELINE_MAP.items():
+        if not force and state.should_skip(step_name):
+            logger.info(f"⏭️  [SKIP] {step_name.value.upper()}")
+            continue
 
-    if new_version_date is None:
-        logger.info("Dados já estão atualizados. Nada a fazer. Encerrando.")
-        return
+        logger.info(f"▶️  [RUN] {step_name.value.upper()}...")
+        state.update(step_name, StepStatus.RUNNING)
 
-    try:
-        # --- ETAPA 1: DOWNLOAD ---
-        logging.info(f"[ETAPA 1 de 4] Iniciando download da versão {new_version_date}")
-        run_download()
-        logging.info("[ETAPA 1 de 4] Download concluído!")
+        try:
+            step_func()
+            state.update(step_name, StepStatus.COMPLETED)
+            logger.info(f"✅ [OK] {step_name.value.upper()}")
 
-        # --- ETAPA 2: EXTRAÇÃO ---
-        logging.info("[ETAPA 2 de 4] Iniciando extração dos arquivos .zip")
-        run_extraction()
-        logging.info("[ETAPA 2 de 4] Extração concluída com sucesso!")
+        except KeyboardInterrupt:
+            logger.warning("\n⚠️ Interrompido pelo usuário.")
+            state.update(step_name, StepStatus.FAILED)
+            sys.exit(130)
 
-        # --- ETAPA 3: CONSOLIDAÇÃO ---
-        logging.info("[ETAPA 3 de 4] Iniciando consolidação dos arquivos .csv")
-        run_consolidation()
-        logging.info("[ETAPA 3 de 4] Consolidação concluída com sucesso!")
+        except SystemExit:
+            raise
 
-        # --- ETAPA 4: CARGA NO BANCO ---
-        logging.info("[ETAPA 4 de 4] Iniciando carga de dados para o PostgreSQL")
-        run_loader()
-        logging.info("[ETAPA 4 de 4] Carga de dados concluída com sucesso!")
+        except Exception as e:
+            logger.error(f"❌ [ERRO] {step_name.value.upper()}: {e}", exc_info=True)
+            state.update(step_name, StepStatus.FAILED)
+            sys.exit(1)
 
-        # --- SUCESSO TOTAL: ATUALIZA O ARQUIVO DE ESTADO ---
-        logger.info(f"Atualizando arquivo de versão local para: {new_version_date}")
-        update_local_version(new_version_date)
-
-    except Exception as e:
-        logging.error(f"❌ O PIPELINE FALHOU. Erro: {e}", exc_info=True)
-        # Não atualizamos a versão aqui, para que ele tente novamente na próxima execução
-        return
-
-    end_time = time.time()
-    total_time = end_time - start_time
-    logging.info("==================================================")
-    logging.info("✅ PIPELINE DE DADOS FINALIZADO COM SUCESSO! ✅")
-    logging.info(f"⏱️ Tempo total de execução: {total_time:.2f} segundos.")
-    logging.info("==================================================")
+    elapsed = time.time() - start_time
+    logger.info(f"🏁 Pipeline Finalizado com Sucesso em {elapsed:.2f}s")
 
 
 if __name__ == "__main__":
-    main_pipeline()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--force", action="store_true", help="Ignora o histórico e roda tudo."
+    )
+    args = parser.parse_args()
+
+    run_pipeline(force=args.force)
