@@ -4,7 +4,7 @@ from pathlib import Path
 
 from typing import Literal, Dict, Optional
 from enum import Enum
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict, Field
 from pydantic import computed_field
 
 
@@ -41,63 +41,103 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    # Sobe 2 níveis para chegar na raiz do projeto (source/config.py)
-    project_root: Path = Path(__file__).resolve().parents[1]
-
-    # URL Base da Receita (sem a data)
-    rfb_base_url: str = (
-        "https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/"
+    # --- Estrutura do Projeto ---
+    project_root: Path = Field(
+        default=Path(__file__).resolve().parents[1],
+        description="Caminho raiz do projeto (sobe 2 níveis a partir deste arquivo).",
     )
 
-    # Esta variável será preenchida dinamicamente pelo script de update
-    # Default vazio ou uma data específica se for rodar manual
-    target_date: str = ""
+    rfb_base_url: str = Field(
+        default="https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/",
+        description="URL Base da Receita Federal onde ficam as pastas por data.",
+    )
 
-    postgres_user: str
-    postgres_password: str
-    postgres_host: str
-    postgres_port: int
-    postgres_database: str
+    target_date: str = Field(
+        default="",
+        description=(
+            "Data alvo (YYYY-MM) para download. Se vazio, é preenchido"
+            "dinamicamente pelo check_update."
+        ),
+    )
 
-    # Configurações de Download e Extração
+    # --- Banco de Dados (Obrigatórios) ---
+    postgres_user: str = Field(description="Usuário do PostgreSQL.")
+    postgres_password: str = Field(description="Senha do PostgreSQL.")
+    postgres_host: str = Field(description="Host do banco (ex: localhost, db).")
+    postgres_port: int = Field(default=5432, description="Porta do banco.")
+    postgres_database: str = Field(description="Nome do banco de dados.")
 
-    # Número de downloads simultâneos (não exagere para não tomar block)
-    max_workers: int = 4
-    extract_workers: int = 2
-    # Tamanho do pedaço lido na memória durante download (8KB)
-    download_chunk_size: int = 8192
+    # --- Performance de Download/Extração ---
+    max_workers: int = Field(
+        default=4,
+        description="Número máximo de downloads simultâneos.",
+    )
+    extract_workers: int = Field(
+        default=2, description="Número de processos paralelos para extração de ZIPs."
+    )
+    download_chunk_size: int = Field(
+        default=8192, description="Tamanho do buffer (bytes) para download em stream."
+    )
 
-    """
-    O script por padrão desativa o log de transação (WAL) 
-    Otização que torna as tabelas unlogged.
-    A escrita fica muito mais rápida.
-    
-    Se quiser segurança após a carga, volte para LOGGED. 
-    Mas demora um pouco pois ele vai escrever o log agora.
-    Para dados analíticos, pode deixar UNLOGGED se tiver backup do CSV.
-    """
+    # --- Otimização de Carga (UNLOGGED) ---
+    use_unlogged: bool = Field(
+        default=True,
+        description=(
+            "Cria tabelas como UNLOGGED (sem WAL) para escrita ultra-rápida."
+            "Dados somem se o servidor reiniciar durante a carga.",
+        ),
+    )
 
-    set_logged_after_copy: bool = False
-    use_unlogged: bool = True
-    cluster_after_copy: bool = False
-    skip_constraints: bool = False
+    set_logged_after_copy: bool = Field(
+        default=True,
+        description=(
+            "Se True, altera as tabelas para LOGGED (persistentes) ao final"
+            "da carga. Recomendado para segurança.",
+        ),
+    )
 
-    # Lógicas de tratamento de texto
-    normalize_line_endings: bool = True
-    strip_bom: bool = True
+    cluster_after_copy: bool = Field(
+        default=False,
+        description=(
+            "Se True, reordena fisicamente a tabela no disco baseada"
+            "no índice (CLUSTER). Operação muito lenta.",
+        ),
+    )
 
-    """
-    Configurações da migração de dados, caso tenha mais memória
-    você pode aumentar, o padrão é 200_000 o que da um consumo de
-    200-500 megas de memória. Essa variação ocorre por conta do tamanho
-    das tabelas
-    """
+    # --- Constraints e Integridade ---
+    skip_constraints: bool = Field(
+        default=False,
+        description=(
+            "Se True, PULA a criação de PKs, FKs e Índices. "
+            "Útil se você quer apenas os dados brutos para leitura rápida "
+            "ou se os dados da Receita estiverem muito inconsistentes."
+        ),
+    )
 
-    file_encoding: str = "latin1"
-    chunk_size: int = 200_000
+    # --- Tratamento de Arquivos ---
+    normalize_line_endings: bool = Field(
+        default=True, description="Converte quebras de linha Windows/Linux para padrão."
+    )
+    strip_bom: bool = Field(
+        default=True,
+        description="Remove Byte Order Mark (BOM) do início dos arquivos CSV.",
+    )
+    file_encoding: str = Field(
+        default="latin1",
+        description="Encoding original dos arquivos da Receita (geralmente latin1/iso-8859-1).",
+    )
 
-    # Set log level
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    chunk_size: int = Field(
+        default=200_000,
+        description=(
+            "Quantidade de linhas lidas por vez na memória (Pandas Chunk). "
+            "Aumentar consome mais RAM, diminuir deixa o processo mais lento."
+        ),
+    )
+
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
+        default="INFO", description="Nível de detalhe dos logs."
+    )
 
     @computed_field
     def download_url(self) -> str:
