@@ -162,10 +162,10 @@ switch ($Task) {
     Invoke-Step $STEP { if (Use-Poetry) { poetry run python -m src --step $STEP } else { python -m src --step $STEP } }
   }
   "ci" {
-    try { py -3.10 -m venv .venv310 } catch {}
-    if (Test-Path .venv310\Scripts\Activate.ps1) { . .\.venv310\Scripts\Activate.ps1 } else { python -m venv .venv; . .\.venv\Scripts\Activate.ps1 }
+    if (-not (Test-Path ".venv310\Scripts\python.exe")) { try { py -3.10 -m venv .venv310 } catch { python -m venv .venv310 } }
+    . .\.venv310\Scripts\Activate.ps1
     python -m pip install --upgrade pip
-    pip install -r requirements.txt -r requirements-dev.txt
+    python -m pip install -r requirements.txt -r requirements-dev.txt
     pytest -q -m "not integration" --maxfail=1 --disable-warnings --cov=src --cov-report=term-missing
     ruff check .
     mypy src
@@ -173,16 +173,12 @@ switch ($Task) {
     docker compose up -d db
     $maxTries = 10
     for ($i = 0; $i -lt $maxTries; $i++) {
-      docker compose exec db pg_isready -U cnpj -d cnpj
+      docker compose exec -T db pg_isready -U cnpj -d cnpj
       if ($LASTEXITCODE -eq 0) { break }
       Start-Sleep -Seconds 3
     }
     $env:PG_INTEGRATION = "1"
-    $env:POSTGRES_USER = "cnpj"
-    $env:POSTGRES_PASSWORD = "cnpj"
-    $env:POSTGRES_HOST = "127.0.0.1"
-    $env:POSTGRES_PORT = "5432"
-    $env:POSTGRES_DATABASE = "cnpj"
+    Setup-PostgresEnv
     pytest -q -m integration --maxfail=1 --disable-warnings
     docker compose down -v
   }
