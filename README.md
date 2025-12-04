@@ -162,76 +162,76 @@ erDiagram
     %% ==========================================
 
     EMPRESAS {
-        string cnpj_basico PK
-        string razao_social
-        numeric capital_social
-        int natureza_juridica_codigo FK
-        int qualificacao_responsavel FK
-        int porte_empresa
-        string ente_federativo_responsavel
+        texto   cnpj_basico PK
+        texto   razao_social
+        numerico capital_social
+        inteiro natureza_juridica_codigo FK
+        inteiro qualificacao_responsavel FK
+        inteiro porte_empresa
+        texto   ente_federativo_responsavel
     }
 
     ESTABELECIMENTOS {
-        string cnpj_basico PK, FK
-        string cnpj_ordem PK
-        string cnpj_dv PK
-        int identificador_matriz_filial
-        string nome_fantasia
-        int situacao_cadastral
-        date data_situacao_cadastral
-        int motivo_situacao_cadastral
-        int pais_codigo FK
-        int municipio_codigo FK
-        int cnae_fiscal_principal_codigo FK
-        string[] cnae_fiscal_secundaria
-        string uf
+        texto   cnpj_basico PK, FK
+        texto   cnpj_ordem PK
+        texto   cnpj_dv PK
+        inteiro identificador_matriz_filial
+        texto   nome_fantasia
+        inteiro situacao_cadastral
+        data    data_situacao_cadastral
+        inteiro motivo_situacao_cadastral
+        inteiro pais_codigo FK
+        inteiro municipio_codigo FK
+        inteiro cnae_fiscal_principal_codigo FK
+        texto[] cnae_fiscal_secundaria
+        texto   uf
     }
 
-    SOCIOS {
-        string cnpj_basico FK
-        int identificador_socio
-        string nome_socio_ou_razao_social
-        string cnpj_cpf_socio
-        int qualificacao_socio_codigo FK
-        int pais_codigo FK
-        int qualificacao_representante_legal_codigo FK
+    SÓCIOS {
+        texto   cnpj_basico FK
+        inteiro identificador_socio
+        texto   nome_socio_ou_razao_social
+        texto   cnpj_cpf_socio
+        inteiro qualificacao_socio_codigo FK
+        inteiro pais_codigo FK
+        inteiro qualificacao_representante_legal_codigo FK
     }
 
     SIMPLES {
-        string cnpj_basico PK, FK
-        string opcao_pelo_simples
-        date data_opcao_pelo_simples
-        date data_exclusao_do_simples
-        string opcao_pelo_mei
+        texto   cnpj_basico PK, FK
+        texto   opcao_pelo_simples
+        data    data_opcao_pelo_simples
+        data    data_exclusao_do_simples
+        texto   opcao_pelo_mei
     }
 
     %% ==========================================
     %% TABELAS DE DOMÍNIO
     %% ==========================================
 
-    NATUREZAS_JURIDICAS {
-        int codigo PK
-        string nome
+    NATUREZAS_JURÍDICAS {
+        inteiro codigo PK
+        texto   nome
     }
 
-    QUALIFICACOES_SOCIOS {
-        int codigo PK
-        string nome
+    QUALIFICAÇÕES_SÓCIOS {
+        inteiro codigo PK
+        texto   nome
     }
 
     CNAES {
-        int codigo PK
-        string nome
+        inteiro codigo PK
+        texto   nome
     }
 
-    PAISES {
-        int codigo PK
-        string nome
+    PAÍSES {
+        inteiro codigo PK
+        texto   nome
     }
 
-    MUNICIPIOS {
-        int codigo PK
-        string nome
+    MUNICÍPIOS {
+        inteiro codigo PK
+        texto   nome
     }
 
     %% ==========================================
@@ -239,18 +239,18 @@ erDiagram
     %% ==========================================
 
     EMPRESAS ||--|{ ESTABELECIMENTOS : "possui (1:N)"
-    EMPRESAS ||--o{ SOCIOS : "tem (1:N)"
-    EMPRESAS ||--o| SIMPLES : "pode ter (1:1)"
+    EMPRESAS ||--o{ SÓCIOS           : "tem (1:N)"
+    EMPRESAS ||--o| SIMPLES          : "pode ter (1:1)"
 
-    EMPRESAS }|--|| NATUREZAS_JURIDICAS : "tipo de"
-    EMPRESAS }|--|| QUALIFICACOES_SOCIOS : "qualif. responsavel"
+    EMPRESAS }|--|| NATUREZAS_JURÍDICAS   : "tipo de"
+    EMPRESAS }|--|| QUALIFICAÇÕES_SÓCIOS  : "qualif. responsável"
 
-    ESTABELECIMENTOS }|--|| MUNICIPIOS : "localizado em"
-    ESTABELECIMENTOS }|--|| PAISES : "localizado em"
-    ESTABELECIMENTOS }|--|| CNAES : "atividade principal"
+    ESTABELECIMENTOS }|--|| MUNICÍPIOS : "localizado em"
+    ESTABELECIMENTOS }|--|| PAÍSES     : "localizado em"
+    ESTABELECIMENTOS }|--|| CNAES      : "atividade principal"
 
-    SOCIOS }|--|| PAISES : "nacionalidade"
-    SOCIOS }|--|| QUALIFICACOES_SOCIOS : "qualif. sócio"
+    SÓCIOS }|--|| PAÍSES                : "nacionalidade"
+    SÓCIOS }|--|| QUALIFICAÇÕES_SÓCIOS  : "qualif. sócio"
 ```
 
 ### Explicação visual das ligações
