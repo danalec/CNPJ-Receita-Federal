@@ -1,7 +1,14 @@
 import logging
 from pathlib import Path
 from typing import List
-from .settings import settings
+
+__all__ = [
+    "get_subdirectories",
+    "get_source_files",
+    "get_source_csv_files",
+    "concatenate_files_in_directory",
+    "run_consolidation",
+]
 
 
 logger = logging.getLogger(__name__)
@@ -34,6 +41,7 @@ def concatenate_files_in_directory(dir_path: Path, delete_sources: bool = False)
     pois eles não têm cabeçalho. Evitando também erros de charset
     """
     logger.info(f"Iniciando processamento do diretório: '{dir_path.name}'")
+    from src.settings import settings
     output_filename = f"{dir_path.name}.csv"
     output_filepath = dir_path / output_filename
 
@@ -88,6 +96,7 @@ def run_consolidation(delete_sources: bool = False):
     Função principal que orquestra todo o processo de concatenação.
     """
     logger.info("Iniciando processo de consolidação de dados...")
+    from src.settings import settings
 
     extracted_dir = settings.extracted_dir
 

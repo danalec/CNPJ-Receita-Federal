@@ -15,6 +15,7 @@ class PipelineStep(Enum):
     EXTRACT = "extract"
     CONSOLIDATE = "consolidate"
     LOAD = "load"
+    CONSTRAINTS = "constraints"
 
 
 def main():
@@ -26,6 +27,7 @@ def main():
         PipelineStep.EXTRACT: extract_files.run_extraction,
         PipelineStep.CONSOLIDATE: consolidate_csv.run_consolidation,
         PipelineStep.LOAD: database_loader.run_loader,
+        PipelineStep.CONSTRAINTS: database_loader.run_constraints,
     }
 
     def run_pipeline(force: bool = False):

@@ -118,7 +118,10 @@ def download_file(url: str, dest_dir: Path):
     dest_path = dest_dir / filename
     download_chunk_size = settings.download_chunk_size
 
-    session = get_session(referrer=url)
+    try:
+        session = get_session(referrer=url)
+    except TypeError:
+        session = get_session()
 
     try:
         existing_size = dest_path.stat().st_size if dest_path.exists() else 0

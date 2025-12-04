@@ -87,6 +87,7 @@ LOG_BACKUP_COUNT=7
 - Boas práticas de índices: [boas-praticas-indices.md](boas-praticas-indices.md)
 - Guia de Docker: [docker.md](docker.md)
 - Rotação de User-Agent (Downloader): [user-agent.md](user-agent.md)
+- Download dos dados (multithread): [download.md](download.md)
 - Visão geral e início rápido: [README.md](../README.md)
 
 ## Renderização do Diagrama ER

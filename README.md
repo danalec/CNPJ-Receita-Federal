@@ -71,11 +71,37 @@ LOG_BACKUP_COUNT=7
 # DATABASE_URL=postgresql://user:pass@host:5432/db
 ```
 
+## Download dos dados (multithread)
+
+- Módulo responsável: `src/downloader.py`
+- Configure a data alvo e paralelismo no `.env`:
+
+```ini
+TARGET_DATE=2025-11
+MAX_WORKERS=4
+DOWNLOAD_CHUNK_SIZE=8192
+VERIFY_ZIP_INTEGRITY=true
+```
+
+- Execute apenas a etapa de download pelo orquestrador:
+
+```bash
+python -m src --step download
+```
+
+- Ou execute diretamente o módulo de download:
+
+```bash
+python -m src.downloader
+```
+
+- Detalhes adicionais em [docs/download.md](docs/download.md).
+
 ## Exemplos por etapa
-Exemplos detalhados estão em `docs/`.
+Exemplos detalhados estão em [docs/](docs/index.md).
 
 ## Fluxo de dados
-A visão completa do fluxo está em `docs/`.
+A visão completa do fluxo está em [docs/](docs/index.md).
 
 ## Instalação e configuração
 ```bash

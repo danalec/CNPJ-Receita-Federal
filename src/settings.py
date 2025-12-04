@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import Literal, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from enum import Enum
 from pydantic import computed_field
 
 
@@ -59,6 +60,10 @@ class Settings(BaseSettings):
     partition_estabelecimentos_by: Literal["none", "uf"] = "none"
     normalize_line_endings: bool = True
     strip_bom: bool = True
+
+    # Comportamento de schema e constraints
+    allow_drop: bool = False
+    skip_constraints: bool = False
 
     """
     Configurações da migração de dados, caso tenha mais memória
@@ -149,3 +154,23 @@ def setup_logging():
             logging.StreamHandler(),
         ],
     )
+
+
+class PipelineStep(Enum):
+    CHECK = "check"
+    DOWNLOAD = "download"
+    EXTRACT = "extract"
+    CONSOLIDATE = "consolidate"
+    LOAD = "load"
+
+
+from .state import state, StepStatus  # re-export for typing compatibility
+
+__all__ = [
+    "Settings",
+    "settings",
+    "setup_logging",
+    "PipelineStep",
+    "state",
+    "StepStatus",
+]

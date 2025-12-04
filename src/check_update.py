@@ -113,5 +113,9 @@ def check_updates(skip_clean: bool = False) -> Optional[str]:
     return latest_remote
 
 
+def run_check_step() -> Optional[str]:
+    return check_updates()
+
+
 if __name__ == "__main__":
     check_updates()

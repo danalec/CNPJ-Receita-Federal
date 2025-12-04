@@ -407,6 +407,12 @@ def execute_sql_file(conn, filename):
         sql_content = sql_content.replace("CREATE UNLOGGED TABLE", "CREATE TABLE")
 
     try:
+        # Configura GUCs conforme settings
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SET app.allow_drop = %s", ('1' if getattr(settings, 'allow_drop', False) else '0',))
+        except Exception:
+            pass
         if "CONCURRENTLY" in sql_content:
             old_autocommit = conn.autocommit
             try:
@@ -421,8 +427,8 @@ def execute_sql_file(conn, filename):
         else:
             with conn.cursor() as cursor:
                 cursor.execute(sql_content)
-            conn.commit()
-            logger.info(f"Sucesso ao executar {filename}")
+        conn.commit()
+        logger.info(f"Sucesso ao executar {filename}")
     except Exception as e:
         conn.rollback()
         logger.error(f"ERRO ao executar SQL de {filename}: {e}")
@@ -595,7 +601,8 @@ def run_loader(only=None, exclude=None):
             conn.commit()
 
         logger.info("Aplicando Constraints e Índices...")
-        execute_sql_file(conn, "constraints.sql")
+        if not getattr(settings, 'skip_constraints', False):
+            execute_sql_file(conn, "constraints.sql")
         with conn.cursor() as cursor:
             for t in [
                 "empresas",
@@ -640,3 +647,37 @@ def _detect_encoding(file_path: Path, default: str) -> str:
     return default
 def clear_domain_cache():
     DOMAIN_CACHE.clear()
+
+
+def run_constraints():
+    """
+    Executa apenas o arquivo de constraints e índices.
+    """
+    logger.info("Aplicando apenas Constraints e Índices...")
+    try:
+        conn = psycopg2.connect(settings.database_uri)
+    except Exception as e:
+        logger.error(f"Erro ao conectar no banco: {e}")
+        return
+    try:
+        execute_sql_file(conn, "constraints.sql")
+        with conn.cursor() as cursor:
+            for t in [
+                "empresas",
+                "estabelecimentos",
+                "socios",
+                "simples",
+                "paises",
+                "municipios",
+                "qualificacoes_socios",
+                "naturezas_juridicas",
+                "cnaes",
+            ]:
+                cursor.execute(f"ANALYZE {t};")
+        conn.commit()
+        logger.info("Constraints aplicadas com sucesso.")
+    except Exception as e:
+        logger.error(f"Erro ao aplicar constraints: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
