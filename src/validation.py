@@ -150,6 +150,34 @@ def validate(config_name: str, df: pd.DataFrame):
         t = s.astype(str).str.strip().str.lower()
         return t.where(t.str.contains(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", regex=True))
 
+    def _normalize_email_strict(s: pd.Series) -> pd.Series:
+        def norm(x: str) -> str | None:
+            if x is None:
+                return None
+            t = str(x).strip()
+            if not t or t.count("@") != 1:
+                return None
+            local, domain = t.split("@", 1)
+            if not local or not domain:
+                return None
+            if local.startswith(".") or local.endswith(".") or ".." in local:
+                return None
+            if not re.fullmatch(r"[A-Za-z0-9._%+-]+", local):
+                return None
+            d = domain.strip().lower().rstrip(".")
+            labels = d.split(".")
+            if len(labels) < 2:
+                return None
+            for lbl in labels:
+                if not re.fullmatch(r"[a-z0-9-]+", lbl):
+                    return None
+                if lbl.startswith("-") or lbl.endswith("-") or len(lbl) == 0 or len(lbl) > 63:
+                    return None
+            if len(labels[-1]) < 2:
+                return None
+            return local + "@" + ".".join(labels)
+        return s.map(norm)
+
     def _normalize_cnae_code(s: pd.Series) -> pd.Series:
         d = _digits_only(s)
         return pd.to_numeric(d.where(d.str.len().eq(7)), errors="coerce").astype("Int64")
@@ -236,6 +264,8 @@ def validate(config_name: str, df: pd.DataFrame):
         if level == "aggressive":
             if "cnae_fiscal_secundaria" in df.columns:
                 df["cnae_fiscal_secundaria"] = _dedup_sort_pg_array(df["cnae_fiscal_secundaria"]) 
+            if "correio_eletronico" in df.columns:
+                df["correio_eletronico"] = _normalize_email_strict(df["correio_eletronico"])
             for c in ["ddd_1","ddd_2","ddd_fax"]:
                 if c in df.columns:
                     d = df[c].astype(str)
@@ -244,6 +274,31 @@ def validate(config_name: str, df: pd.DataFrame):
                 if c in df.columns:
                     d = df[c].astype(str)
                     df[c] = d.where(d.str.len().between(8,11))
+            def _e164(ddd: str, phone: str) -> str | None:
+                if not ddd or not phone:
+                    return None
+                if not ddd.isdigit() or not phone.isdigit():
+                    return None
+                if len(ddd) not in (2,3):
+                    return None
+                if len(phone) not in (8,9,10,11):
+                    return None
+                return "+55" + ddd + phone
+            e164_examples = {}
+            pairs = [("ddd_1","telefone_1"),("ddd_2","telefone_2"),("ddd_fax","fax")]
+            for dcol, pcol in pairs:
+                if dcol in df.columns and pcol in df.columns:
+                    dser = df[dcol].fillna("").astype(str)
+                    pser = df[pcol].fillna("").astype(str)
+                    ex = []
+                    for i in range(min(len(df), 200)):
+                        v = _e164(dser.iloc[i], pser.iloc[i])
+                        if v:
+                            ex.append(v)
+                        if len(ex) >= 10:
+                            break
+                    if ex:
+                        e164_examples[pcol] = ex
 
     elif config_name == "socios":
         if "cnpj_basico" in df.columns:
@@ -302,4 +357,6 @@ def validate(config_name: str, df: pd.DataFrame):
         if "invalid_ids" in locals() and invalid_ids:
             telemetry["invalid_ids"] = invalid_ids
             telemetry["invalid_id_examples"] = invalid_examples
+        if level == "aggressive" and "e164_examples" in locals() and e164_examples:
+            telemetry["e164_examples"] = e164_examples
     return df, telemetry, masks
