@@ -1,3 +1,5 @@
+[[Voltar ao README]](../README.md) • [[Descrição dos dados]](descricao-dados.md)
+
 erDiagram
     %% ==========================================
     %% TABELAS PRINCIPAIS

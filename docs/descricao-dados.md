@@ -1,3 +1,5 @@
+[[Voltar ao README]](../README.md) • [[Diagrama ER]](diagrama_er.md)
+
 ### Layout para os DADOS ABERTOS do CNPJ
 
 ### EMPRESAS

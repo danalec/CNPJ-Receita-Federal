@@ -145,6 +145,24 @@ LOG_LEVEL=INFO
 - `VERIFY_ZIP_INTEGRITY=true` habilita verificação de integridade de ZIPs.
 - `RATE_LIMIT_PER_SEC` (>0) ativa limitação de taxa de download.
 
+### Diagnóstico de performance
+
+- Otimize consultas críticas com `EXPLAIN ANALYZE` e índices adequados.
+- Recomendações gerais: rode `ANALYZE` após grandes cargas para atualizar estatísticas; crie índices conforme padrões de acesso.
+
+- Exemplos (SQL):
+  - Acesso por UF e CNAE principal em `estabelecimentos`:
+    - `EXPLAIN ANALYZE SELECT cnpj_basico, cnpj_ordem, uf FROM estabelecimentos WHERE uf = 'SP' AND cnae_fiscal_principal_codigo = 6201500 LIMIT 100;`
+    - Índice sugerido: `CREATE INDEX IF NOT EXISTS ix_estab_uf_cnae ON estabelecimentos (uf, cnae_fiscal_principal_codigo);`
+
+  - Junção `sócios` → `empresas` para contagem por empresa:
+    - `EXPLAIN ANALYZE SELECT e.cnpj_basico, COUNT(*) FROM socios s JOIN empresas e USING (cnpj_basico) GROUP BY e.cnpj_basico ORDER BY COUNT(*) DESC LIMIT 50;`
+    - Índices sugeridos: `CREATE INDEX IF NOT EXISTS ix_socios_cnpj ON socios (cnpj_basico);` e `CREATE INDEX IF NOT EXISTS ix_empresas_cnpj ON empresas (cnpj_basico);`
+
+  - Filtros comuns em `estabelecimentos` por município e situação:
+    - `EXPLAIN ANALYZE SELECT cnpj_basico FROM estabelecimentos WHERE municipio_codigo = 3550308 AND situacao_cadastral = 2 LIMIT 100;`
+    - Índices sugeridos: `CREATE INDEX IF NOT EXISTS ix_estab_municipio ON estabelecimentos (municipio_codigo);` e `CREATE INDEX IF NOT EXISTS ix_estab_situacao ON estabelecimentos (situacao_cadastral);`
+
 ## Testes
 
 - Unitários: execute `pytest -q`.
@@ -180,8 +198,9 @@ LOG_LEVEL=INFO
 
 ## Diagrama do banco (ER)
 
-Também pode ser visualizado em um PDF direto no [Site da receita](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf)
-Há uma versão em markdown em `docs`.
+Também pode ser visualizado em um PDF direto no [Site da Receita](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf).
+- Diagrama detalhado (Markdown): [docs/diagrama_er.md](docs/diagrama_er.md)
+- Descrição dos dados (campos, layout oficial): [docs/descricao-dados.md](docs/descricao-dados.md)
 
 ```mermaid
 erDiagram
