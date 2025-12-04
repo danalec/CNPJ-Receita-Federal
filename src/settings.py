@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     # Set log level
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     strict_fk_validation: bool = True
+    auto_repair_level: Literal["none", "basic", "aggressive"] = "basic"
 
     user_agent_rotation: Literal["random", "sequential"] = "random"
     user_agents: list[str] = []

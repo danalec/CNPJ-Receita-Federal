@@ -2,6 +2,7 @@ import pandas as pd
 import re
 import logging
 from typing import TypeVar, Generic
+from .settings import settings
 
 T = TypeVar("T")
 class PanderaSeries(Generic[T]):
@@ -82,6 +83,9 @@ class SimplesSchema(SchemaModel):
 
 def validate(config_name: str, df: pd.DataFrame) -> pd.DataFrame:
     logger = logging.getLogger(__name__)
+    level = getattr(settings, "auto_repair_level", "basic")
+    if level == "none":
+        return df
 
     def _digits_only(s: pd.Series) -> pd.Series:
         return s.astype(str).str.replace(r"\D+", "", regex=True)
@@ -126,6 +130,22 @@ def validate(config_name: str, df: pd.DataFrame) -> pd.DataFrame:
             return ("{" + ",".join(clean) + "}") if clean else None
         return s.map(fix)
 
+    def _dedup_sort_pg_array(s: pd.Series) -> pd.Series:
+        def fix(x: str | None) -> str | None:
+            if x is None:
+                return None
+            xs = str(x).strip()
+            if not xs or not xs.startswith("{") or not xs.endswith("}"):
+                return None
+            body = xs[1:-1]
+            toks = [t for t in body.split(",") if t]
+            try:
+                nums = sorted({int(t) for t in toks})
+            except Exception:
+                return None
+            return ("{" + ",".join(str(n) for n in nums) + "}") if nums else None
+        return s.map(fix)
+
     if config_name == "empresas":
         if "cnpj_basico" in df.columns:
             df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
@@ -157,6 +177,17 @@ def validate(config_name: str, df: pd.DataFrame) -> pd.DataFrame:
         for c in ["ddd_1","telefone_1","ddd_2","telefone_2","ddd_fax","fax","numero"]:
             if c in df.columns:
                 df[c] = _digits_only(df[c]).mask(df[c].astype(str).str.strip().eq(""))
+        if level == "aggressive":
+            if "cnae_fiscal_secundaria" in df.columns:
+                df["cnae_fiscal_secundaria"] = _dedup_sort_pg_array(df["cnae_fiscal_secundaria"]) 
+            for c in ["ddd_1","ddd_2","ddd_fax"]:
+                if c in df.columns:
+                    d = df[c].astype(str)
+                    df[c] = d.where(d.str.len().isin([2,3]))
+            for c in ["telefone_1","telefone_2","fax"]:
+                if c in df.columns:
+                    d = df[c].astype(str)
+                    df[c] = d.where(d.str.len().between(8,11))
 
     elif config_name == "socios":
         if "cnpj_basico" in df.columns:
