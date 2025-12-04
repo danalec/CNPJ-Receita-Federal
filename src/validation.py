@@ -102,6 +102,32 @@ def validate(config_name: str, df: pd.DataFrame):
             cols_for_diff = ["cnpj_basico"]
     snapshot = {c: df[c].astype(str).copy() for c in cols_for_diff if c in df.columns}
 
+    def _cpf_valid(s: str) -> bool:
+        if not s or len(s) != 11 or s == s[0] * 11:
+            return False
+        nums = [int(x) for x in s]
+        sm1 = sum(nums[i] * (10 - i) for i in range(9))
+        d1 = 0 if sm1 % 11 < 2 else 11 - (sm1 % 11)
+        if nums[9] != d1:
+            return False
+        sm2 = sum(nums[i] * (11 - i) for i in range(10))
+        d2 = 0 if sm2 % 11 < 2 else 11 - (sm2 % 11)
+        return nums[10] == d2
+
+    def _cnpj_valid(s: str) -> bool:
+        if not s or len(s) != 14 or s == s[0] * 14:
+            return False
+        nums = [int(x) for x in s]
+        w1 = [5,4,3,2,9,8,7,6,5,4,3,2]
+        sm1 = sum(nums[i] * w1[i] for i in range(12))
+        d1 = 0 if sm1 % 11 < 2 else 11 - (sm1 % 11)
+        if nums[12] != d1:
+            return False
+        w2 = [6,5,4,3,2,9,8,7,6,5,4,3,2]
+        sm2 = sum(nums[i] * w2[i] for i in range(13))
+        d2 = 0 if sm2 % 11 < 2 else 11 - (sm2 % 11)
+        return nums[13] == d2
+
     def _digits_only(s: pd.Series) -> pd.Series:
         return s.astype(str).str.replace(r"\D+", "", regex=True)
 
@@ -192,6 +218,19 @@ def validate(config_name: str, df: pd.DataFrame):
         for c in ["ddd_1","telefone_1","ddd_2","telefone_2","ddd_fax","fax","numero"]:
             if c in df.columns:
                 df[c] = _digits_only(df[c]).mask(df[c].astype(str).str.strip().eq(""))
+        invalid_ids = {}
+        invalid_examples = {}
+        if {"cnpj_basico","cnpj_ordem","cnpj_dv"}.issubset(df.columns):
+            cb = _digits_only(df["cnpj_basico"]).fillna("")
+            co = _digits_only(df["cnpj_ordem"]).fillna("")
+            dv = _digits_only(df["cnpj_dv"]).fillna("")
+            full = (cb + co + dv)
+            mask_full = full.str.len().eq(14)
+            valid_mask = mask_full & full.map(_cnpj_valid)
+            invalid_mask = mask_full & ~valid_mask
+            if invalid_mask.any():
+                invalid_ids["estabelecimentos_cnpj"] = int(invalid_mask.sum())
+                invalid_examples["estabelecimentos_cnpj"] = full.loc[invalid_mask].head(10).tolist()
         if level == "aggressive":
             if "cnae_fiscal_secundaria" in df.columns:
                 df["cnae_fiscal_secundaria"] = _dedup_sort_pg_array(df["cnae_fiscal_secundaria"]) 
@@ -209,9 +248,18 @@ def validate(config_name: str, df: pd.DataFrame):
             df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
         if "cnpj_cpf_socio" in df.columns:
             d = _digits_only(df["cnpj_cpf_socio"])
-            df["cnpj_cpf_socio"] = d.where(d.str.len().isin([11,14]))
+            mask_len = d.str.len().isin([11,14])
+            def _ok(x: str) -> bool:
+                if len(x) == 11:
+                    return _cpf_valid(x)
+                if len(x) == 14:
+                    return _cnpj_valid(x)
+                return False
+            valid = d.where(mask_len).map(lambda x: _ok(x) if isinstance(x, str) else False)
+            df["cnpj_cpf_socio"] = d.where(valid)
         if "representante_legal_cpf" in df.columns:
-            df["representante_legal_cpf"] = _ensure_len(df["representante_legal_cpf"], 11)
+            cpf = _ensure_len(df["representante_legal_cpf"], 11)
+            df["representante_legal_cpf"] = cpf.where(cpf.map(lambda x: _cpf_valid(x) if isinstance(x, str) else False))
         for c in ["nome_socio_ou_razao_social","nome_representante_legal"]:
             if c in df.columns:
                 df[c] = _strip_empty_to_na(df[c])
@@ -248,4 +296,8 @@ def validate(config_name: str, df: pd.DataFrame):
         "columns": list(df.columns),
         "sample_diffs": sample_diffs,
     }
+    if config_name == "estabelecimentos":
+        if "invalid_ids" in locals() and invalid_ids:
+            telemetry["invalid_ids"] = invalid_ids
+            telemetry["invalid_id_examples"] = invalid_examples
     return df, telemetry
