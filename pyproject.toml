@@ -18,6 +18,9 @@ dependencies = [
     "charset-normalizer (>=3.3.2,<4.0.0)"
 ]
 
+[project.scripts]
+cnpj = "src.__main__:main"
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
@@ -25,3 +28,4 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.group.dev.dependencies]
 ruff = ">=0.6.9,<1.0.0"
 pytest = ">=8.3.3,<9.0.0"
+pip-audit = ">=2.7.0,<3.0.0"

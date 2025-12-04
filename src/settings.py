@@ -158,6 +158,7 @@ class Settings(BaseSettings):
     file_encoding: str = Field(
         default="latin1",
         description="Encoding original dos arquivos da Receita (geralmente latin1/iso-8859-1).",
+        validation_alias=AliasChoices("FILE_ENCODING"),
     )
 
     chunk_size: int = Field(
@@ -166,22 +167,27 @@ class Settings(BaseSettings):
             "Quantidade de linhas lidas por vez na memória (Pandas Chunk). "
             "Aumentar consome mais RAM, diminuir deixa o processo mais lento."
         ),
+        validation_alias=AliasChoices("CHUNK_SIZE"),
     )
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
-        default="INFO", description="Nível de detalhe dos logs."
+        default="INFO",
+        description="Nível de detalhe dos logs.",
+        validation_alias=AliasChoices("LOG_LEVEL"),
     )
 
     # --- Rotação de logs ---
     log_backup_count: int = Field(
         default=7,
         description="Quantidade de arquivos de log mantidos na rotação diária.",
+        validation_alias=AliasChoices("LOG_BACKUP_COUNT"),
     )
 
     # --- Filtro de CSV ---
     csv_filter: bool = Field(
         default=True,
         description="Pula linhas malformadas e descarta linhas completamente vazias.",
+        validation_alias=AliasChoices("CSV_FILTER"),
     )
 
     @computed_field

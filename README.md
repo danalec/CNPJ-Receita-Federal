@@ -8,16 +8,20 @@ Ferramenta de `ETL` (Extract, Transform, Load) de alto desempenho para baixar, t
 - Nota de integridade: eventualmente a Receita publica versões com lacunas (ex.: `2025-11` sem o código de país `150`). Se houver FKs ausentes, corrija no banco e execute `constraints.sql` para aplicar/reaplicar as restrições.
 
 ```bash
-python main.py --force
+python -m src --force
 # ou execute módulos individuais
-python -m src.<modulo>
+python -m src.check_update
+python -m src.downloader
+python -m src.extract_files
+python -m src.consolidate_csv
+python -m src.database_loader
 ```
 
 ## Uso rápido
 
 1. Instale as dependências e configure o `.env`.
 2. Execute `python -m src.check_update` para verificar novas versões.
-3. Rode `python main.py` para orquestrar todo o pipeline, ou execute módulos individualmente:
+3. Rode `python -m src` para orquestrar todo o pipeline, ou execute módulos individualmente:
    - `python -m src.downloader`
    - `python -m src.extract_files`
    - `python -m src.consolidate_csv`
@@ -51,6 +55,7 @@ Sem `make`, utilize `tasks.ps1` na raiz:
 ## Configuração (`.env`)
 
 Variáveis suportadas (aliases aceitos: `POSTGRES_*` e `PG*`). Opcional: `DATABASE_URL`.
+Suportados também: `LOG_LEVEL`, `LOG_BACKUP_COUNT`, `CSV_FILTER`, `FILE_ENCODING`, `CHUNK_SIZE`.
 
 ```ini
 POSTGRES_HOST=localhost
