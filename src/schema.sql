@@ -1,41 +1,53 @@
 -- ============================================================================
--- 1. LIMPEZA INICIAL (DROP) | CUIDADO APAGA TUDO
+-- SCHEMA RFB
 -- ============================================================================
-DROP TABLE IF EXISTS socios CASCADE;
-DROP TABLE IF EXISTS simples CASCADE;
-DROP TABLE IF EXISTS estabelecimentos CASCADE;
-DROP TABLE IF EXISTS empresas CASCADE;
-DROP TABLE IF EXISTS cnaes CASCADE;
-DROP TABLE IF EXISTS naturezas_juridicas CASCADE;
-DROP TABLE IF EXISTS qualificacoes_socios CASCADE;
-DROP TABLE IF EXISTS municipios CASCADE;
-DROP TABLE IF EXISTS paises CASCADE;
+CREATE SCHEMA IF NOT EXISTS rfb;
+SET search_path TO rfb;
+
+-- ============================================================================
+-- 1. LIMPEZA INICIAL (DROP) COM GUARDA DE ESQUEMA
+-- ============================================================================
+DO $$
+BEGIN
+  IF current_setting('app.allow_drop', true) = '1' THEN
+    EXECUTE 'DROP TABLE IF EXISTS rfb.socios CASCADE';
+    EXECUTE 'DROP TABLE IF EXISTS rfb.simples CASCADE';
+    EXECUTE 'DROP TABLE IF EXISTS rfb.estabelecimentos CASCADE';
+    EXECUTE 'DROP TABLE IF EXISTS rfb.empresas CASCADE';
+    EXECUTE 'DROP TABLE IF EXISTS rfb.cnaes CASCADE';
+    EXECUTE 'DROP TABLE IF EXISTS rfb.naturezas_juridicas CASCADE';
+    EXECUTE 'DROP TABLE IF EXISTS rfb.qualificacoes_socios CASCADE';
+    EXECUTE 'DROP TABLE IF EXISTS rfb.municipios CASCADE';
+    EXECUTE 'DROP TABLE IF EXISTS rfb.paises CASCADE';
+  END IF;
+END
+$$;
 
 -- ============================================================================
 -- 2. TABELAS DE DOMÍNIO (UNLOGGED para carga rápida) SEM PK SEM FK 
 -- ============================================================================
 
-CREATE UNLOGGED TABLE paises (
+CREATE UNLOGGED TABLE rfb.paises (
     codigo SMALLINT, -- Max 999
     nome VARCHAR(100)
 );
 
-CREATE UNLOGGED TABLE municipios (
+CREATE UNLOGGED TABLE rfb.municipios (
     codigo SMALLINT, -- Código SIAFI (4 dígitos)
     nome VARCHAR(150)
 );
 
-CREATE UNLOGGED TABLE qualificacoes_socios (
+CREATE UNLOGGED TABLE rfb.qualificacoes_socios (
     codigo SMALLINT,
     nome VARCHAR(100)
 );
 
-CREATE UNLOGGED TABLE naturezas_juridicas (
+CREATE UNLOGGED TABLE rfb.naturezas_juridicas (
     codigo SMALLINT,
     nome VARCHAR(150)
 );
 
-CREATE UNLOGGED TABLE cnaes (
+CREATE UNLOGGED TABLE rfb.cnaes (
     codigo INTEGER, -- 7 dígitos (ex: 4711302), precisa ser INTEGER
     nome VARCHAR(500) -- Algumas descrições são longas
   
@@ -45,7 +57,7 @@ CREATE UNLOGGED TABLE cnaes (
 -- 3. TABELAS PRINCIPAIS (UNLOGGED)
 -- ============================================================================
 
-CREATE UNLOGGED TABLE empresas (
+CREATE UNLOGGED TABLE rfb.empresas (
     cnpj_basico CHAR(8),
     razao_social VARCHAR(255),
     natureza_juridica_codigo SMALLINT,
@@ -55,7 +67,7 @@ CREATE UNLOGGED TABLE empresas (
     ente_federativo_responsavel VARCHAR(100)
 );
 
-CREATE UNLOGGED TABLE estabelecimentos (
+CREATE UNLOGGED TABLE rfb.estabelecimentos (
     cnpj_basico CHAR(8),
     cnpj_ordem CHAR(4),
     cnpj_dv CHAR(2),
@@ -88,7 +100,7 @@ CREATE UNLOGGED TABLE estabelecimentos (
     data_situacao_especial DATE
 );
 
-CREATE UNLOGGED TABLE simples (
+CREATE UNLOGGED TABLE rfb.simples (
     cnpj_basico CHAR(8),
     opcao_pelo_simples CHAR(1),
     data_opcao_pelo_simples DATE,
@@ -98,7 +110,7 @@ CREATE UNLOGGED TABLE simples (
     data_exclusao_do_mei DATE
 );
 
-CREATE UNLOGGED TABLE socios (
+CREATE UNLOGGED TABLE rfb.socios (
     cnpj_basico CHAR(8),
     identificador_socio SMALLINT, -- 1, 2 ou 3
     nome_socio_ou_razao_social VARCHAR(255),

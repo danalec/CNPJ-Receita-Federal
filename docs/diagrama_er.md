@@ -1,3 +1,6 @@
+[[Voltar ao README]](../README.md) • [[Descrição dos dados]](descricao-dados.md)
+
+```mermaid
 erDiagram
     %% ==========================================
     %% TABELAS PRINCIPAIS
@@ -97,3 +100,4 @@ erDiagram
     SOCIOS }|--|| PAISES : "nacionalidade"
     SOCIOS }|--|| QUALIFICACOES_SOCIOS : "qualif. sócio"
     SOCIOS }|--|| QUALIFICACOES_SOCIOS : "qualif. representante"
+```
