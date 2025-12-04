@@ -4,7 +4,7 @@ import logging
 import unicodedata
 from typing import TypeVar, Generic, ClassVar, Any
 from pathlib import Path
-from .settings import settings
+from .settings import settings, UF_SET
 
 T = TypeVar("T")
 class PanderaSeries(Generic[T]):
@@ -29,7 +29,7 @@ class EmpresasSchema(SchemaModel):
         capital_social: PanderaSeries[float]
         porte_empresa: PanderaSeries[pd.Int64Dtype]
         ente_federativo_responsavel: PanderaSeries[str]
-        DIFF_COLUMNS: ClassVar[list[str]] = ["cnpj_basico","razao_social"]
+        
 
         @classmethod
         def clean(cls, df: pd.DataFrame, level: str, settings_obj, helpers) -> tuple[pd.DataFrame, dict[str, pd.Series], dict[str, Any]]:
@@ -291,7 +291,7 @@ class SimplesSchema(SchemaModel):
         opcao_pelo_mei: PanderaSeries[str]
         data_opcao_pelo_mei: PanderaSeries[object]
         data_exclusao_do_mei: PanderaSeries[object]
-        DIFF_COLUMNS: ClassVar[list[str]] = ["cnpj_basico"]
+        
 
 
         @classmethod
@@ -301,6 +301,16 @@ class SimplesSchema(SchemaModel):
                 return df, {}, {}
 
         
+
+DIFF_COLUMNS_MAP: dict[str, list[str]] = {
+    "empresas": ["cnpj_basico","razao_social"],
+    "estabelecimentos": [
+        "cnpj_basico","cnpj_ordem","cnpj_dv","uf","cep",
+        "cnae_fiscal_principal_codigo","cnae_fiscal_secundaria","correio_eletronico"
+    ],
+    "socios": ["cnpj_basico","cnpj_cpf_socio","representante_legal_cpf"],
+    "simples": ["cnpj_basico"],
+}
 
 SCHEMA_MAP: dict[str, type[SchemaModel]] = {
     "empresas": EmpresasSchema,
@@ -318,9 +328,7 @@ def validate(config_name: str, df: pd.DataFrame):
     before_nulls = {c: int(df[c].isna().sum()) for c in df.columns}
     cols_for_diff = []
     if level == "aggressive":
-        schema = SCHEMA_MAP.get(config_name)
-        if schema is not None and hasattr(schema, "DIFF_COLUMNS"):
-            cols_for_diff = list(getattr(schema, "DIFF_COLUMNS"))
+        cols_for_diff = DIFF_COLUMNS_MAP.get(config_name, [])
     snapshot = {c: df[c].astype(str).copy() for c in cols_for_diff if c in df.columns}
     masks: dict[str, pd.Series] = {}
 
@@ -363,9 +371,7 @@ def validate(config_name: str, df: pd.DataFrame):
 
     def _normalize_uf(s: pd.Series) -> pd.Series:
         val = s.astype(str).str.strip().str.upper()
-        return val.where(val.isin({
-            'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RO','RS','RR','SC','SE','SP','TO'
-        }))
+        return val.where(val.isin(UF_SET))
 
     def _normalize_email(s: pd.Series) -> pd.Series:
         t = s.astype(str).str.strip().str.lower()

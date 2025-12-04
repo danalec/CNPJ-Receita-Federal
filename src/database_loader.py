@@ -9,7 +9,7 @@ import requests
 from psycopg2 import sql
 from pathlib import Path
 from typing import Dict, Tuple, Set, Union, cast, Any, TypedDict, Callable, Optional
-from .settings import settings
+from .settings import settings, UF_SET
 from .validation import validate as schema_validate
 
 logger = logging.getLogger(__name__)
@@ -82,9 +82,7 @@ def _get_domain_set(conn, table, column):
     return s
 
 
-UF_SET = {
-    'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RO','RS','RR','SC','SE','SP','TO'
-}
+ 
 
 
 def _ensure_domains_loaded(conn, domains, strict):
@@ -839,10 +837,7 @@ def create_partitioned_estabelecimentos(conn):
         municipio_source VARCHAR(20)
     ) PARTITION BY LIST (uf);
     """
-    ufs = [
-        'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG',
-        'PA','PB','PR','PE','PI','RJ','RN','RO','RS','RR','SC','SE','SP','TO'
-    ]
+    ufs = sorted(UF_SET)
     parts = []
     for uf in ufs:
         stmt = sql.SQL(

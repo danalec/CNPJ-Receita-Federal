@@ -186,6 +186,12 @@ class Settings(BaseSettings):
         cast(Path, self.auto_repair_dir).mkdir(parents=True, exist_ok=True)
 
 
+# Conjunto de UF único para todo o projeto
+UF_SET: set[str] = {
+    'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RO','RS','RR','SC','SE','SP','TO'
+}
+
+
 # Instancia e cria diretórios
 settings = Settings()
 settings.create_dirs()
