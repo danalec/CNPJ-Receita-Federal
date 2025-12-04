@@ -7,7 +7,7 @@ from src.settings import settings
 def test_state_persistence(tmp_path):
     settings.project_root = Path(tmp_path)
     settings.create_dirs()
-    s = st.PipelineState("2025-11")
+    st.PipelineState("2025-11")
     st.start_run("2025-11")
     st.mark_stage("2025-11", "download", "completed")
     m = st.print_status("2025-11", return_map=True)

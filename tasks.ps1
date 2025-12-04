@@ -14,8 +14,8 @@ function Write-Section([string]$text, [string]$color = 'Cyan') {
 
 function Use-Poetry() { return [bool](Get-Command poetry -ErrorAction SilentlyContinue) }
 
-function PyRun([string[]]$args) {
-  if (Use-Poetry) { & poetry run python @args } else { & python @args }
+function PyRun([string[]]$pyArgs) {
+  if (Use-Poetry) { & poetry run python @pyArgs } else { & python @pyArgs }
 }
 
 function Set-EnvIfMissing([string]$name, [string]$value) {
@@ -23,7 +23,7 @@ function Set-EnvIfMissing([string]$name, [string]$value) {
   if (-not $current -or $current -eq "") { [Environment]::SetEnvironmentVariable($name, $value, "Process") }
 }
 
-function Setup-PostgresEnv() {
+function Set-PostgresEnv() {
   Set-EnvIfMissing "POSTGRES_USER" "cnpj"
   Set-EnvIfMissing "POSTGRES_PASSWORD" "cnpj"
   Set-EnvIfMissing "POSTGRES_HOST" "127.0.0.1"
@@ -73,7 +73,7 @@ function Update-DotEnvTargetDate([string]$Value) {
   }
 }
 
-function Setup-TargetDate() {
+function Set-TargetDate() {
   $td = Resolve-TargetDate
   [Environment]::SetEnvironmentVariable("TARGET_DATE", $td, "Process")
   [Environment]::SetEnvironmentVariable("target_date", $td, "Process")
@@ -81,7 +81,7 @@ function Setup-TargetDate() {
   Write-Host ("[INFO] target_date = {0}" -f $td) -ForegroundColor Cyan
 }
 
-function Ensure-DbUp() {
+function Start-Db() {
   Write-Section "Database" "Cyan"
   docker compose up -d db
   $max = 30
@@ -143,9 +143,9 @@ switch ($Task) {
   }
   "etl" {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    Setup-PostgresEnv
-    Setup-TargetDate
-    Ensure-DbUp
+    Set-PostgresEnv
+    Set-TargetDate
+    Start-Db
     Write-DotEnvIfMissing
     Write-Section "ETL"
     Invoke-Step "download" { if (Use-Poetry) { poetry run python -m src --step download } else { python -m src --step download } } $true
@@ -169,7 +169,13 @@ switch ($Task) {
     pytest -q -m "not integration" --maxfail=1 --disable-warnings --cov=src --cov-report=term-missing
     ruff check .
     mypy src
-    docker build -t cnpj-receita-federal:ci .
+    $skipDockerBuild = ($env:SKIP_DOCKER_BUILD -eq "1" -or $env:SKIP_DOCKER_BUILD -eq "true")
+    if ($skipDockerBuild) {
+      Write-Host "[INFO] Skipping docker build (SKIP_DOCKER_BUILD=$($env:SKIP_DOCKER_BUILD))" -ForegroundColor Cyan
+    } else {
+      docker build -t cnpj-receita-federal:ci .
+      if ($LASTEXITCODE -ne 0) { Write-Host "[WARN] docker build failed, continuing CI without image" -ForegroundColor Yellow }
+    }
     docker compose up -d db
     $maxTries = 10
     for ($i = 0; $i -lt $maxTries; $i++) {
@@ -178,7 +184,7 @@ switch ($Task) {
       Start-Sleep -Seconds 3
     }
     $env:PG_INTEGRATION = "1"
-    Setup-PostgresEnv
+    Set-PostgresEnv
     pytest -q -m integration --maxfail=1 --disable-warnings
     docker compose down -v
   }
