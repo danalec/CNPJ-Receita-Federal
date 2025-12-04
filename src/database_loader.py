@@ -117,65 +117,34 @@ def _validate_fk_set(df, column, valid_set, label, strict):
 
 def validate_chunk(config_name, chunk_df, conn):
     fk_violations = {}
-    if config_name == "empresas":
-        _ensure_domains_loaded(conn, ["naturezas_juridicas", "qualificacoes_socios"], settings.strict_fk_validation)
-        nat = _get_domain_set(conn, "naturezas_juridicas", "codigo")
-        qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
-        if "natureza_juridica_codigo" in chunk_df.columns:
-            m = _validate_fk_set(chunk_df, "natureza_juridica_codigo", nat, "natureza_juridica_codigo", settings.strict_fk_validation)
-            if m is not None and m.any():
-                fk_violations["natureza_juridica_codigo"] = m
-        if "qualificacao_responsavel" in chunk_df.columns:
-            m = _validate_fk_set(chunk_df, "qualificacao_responsavel", qual, "qualificacao_responsavel", settings.strict_fk_validation)
-            if m is not None and m.any():
-                fk_violations["qualificacao_responsavel"] = m
-    elif config_name == "estabelecimentos":
-        _ensure_domains_loaded(conn, ["paises", "municipios", "cnaes", "empresas"], settings.strict_fk_validation)
-        paises = _get_domain_set(conn, "paises", "codigo")
-        municipios = _get_domain_set(conn, "municipios", "codigo")
-        cnaes = _get_domain_set(conn, "cnaes", "codigo")
-        if "pais_codigo" in chunk_df.columns:
-            m = _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo", settings.strict_fk_validation)
-            if m is not None and m.any():
-                fk_violations["pais_codigo"] = m
-        if "municipio_codigo" in chunk_df.columns:
-            m = _validate_fk_set(chunk_df, "municipio_codigo", municipios, "municipio_codigo", settings.strict_fk_validation)
-            if m is not None and m.any():
-                fk_violations["municipio_codigo"] = m
-        if "cnae_fiscal_principal_codigo" in chunk_df.columns:
-            m = _validate_fk_set(chunk_df, "cnae_fiscal_principal_codigo", cnaes, "cnae_fiscal_principal_codigo", settings.strict_fk_validation)
-            if m is not None and m.any():
-                fk_violations["cnae_fiscal_principal_codigo"] = m
-        if "uf" in chunk_df.columns:
+    req = DOMAINS_REQUIRED.get(config_name, [])
+    _ensure_domains_loaded(conn, req, settings.strict_fk_validation)
+    domain_cache: Dict[str, Set[Any]] = {}
+    for col, tbl, colname in FK_RULES.get(config_name, []):
+        if col not in chunk_df.columns:
+            continue
+        if col == "uf":
             m = _validate_fk_set(chunk_df, "uf", UF_SET, "uf", settings.strict_fk_validation)
             if m is not None and m.any():
                 fk_violations["uf"] = m
-        if "cnae_fiscal_secundaria" in chunk_df.columns:
-            s = chunk_df["cnae_fiscal_secundaria"].dropna().astype(str)
-            bad = ~((s.str.startswith("{") & s.str.endswith("}")) | (s == ""))
-            if bad.any():
-                if settings.strict_fk_validation:
-                    raise ValueError("Campo cnae_fiscal_secundaria com formato inválido em algumas linhas. Esperado texto de array PostgreSQL: '{...}'.")
-                else:
-                    chunk_df.loc[bad.index[bad], "cnae_fiscal_secundaria"] = None
-                    logger.warning("Valores inválidos em cnae_fiscal_secundaria foram definidos como nulos.")
-                    fk_violations["cnae_fiscal_secundaria_fmt"] = bad
-    elif config_name == "socios":
-        _ensure_domains_loaded(conn, ["paises", "qualificacoes_socios", "empresas"], settings.strict_fk_validation)
-        paises = _get_domain_set(conn, "paises", "codigo")
-        qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
-        if "pais_codigo" in chunk_df.columns:
-            m = _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo", settings.strict_fk_validation)
+            continue
+        if tbl and colname:
+            if tbl not in domain_cache:
+                domain_cache[tbl] = _get_domain_set(conn, tbl, colname)
+            s = domain_cache[tbl]
+            m = _validate_fk_set(chunk_df, col, s, col, settings.strict_fk_validation)
             if m is not None and m.any():
-                fk_violations["pais_codigo"] = m
-        if "qualificacao_socio_codigo" in chunk_df.columns:
-            m = _validate_fk_set(chunk_df, "qualificacao_socio_codigo", qual, "qualificacao_socio_codigo", settings.strict_fk_validation)
-            if m is not None and m.any():
-                fk_violations["qualificacao_socio_codigo"] = m
-        if "qualificacao_representante_legal_codigo" in chunk_df.columns:
-            m = _validate_fk_set(chunk_df, "qualificacao_representante_legal_codigo", qual, "qualificacao_representante_legal_codigo", settings.strict_fk_validation)
-            if m is not None and m.any():
-                fk_violations["qualificacao_representante_legal_codigo"] = m
+                fk_violations[col] = m
+    if config_name == "estabelecimentos" and "cnae_fiscal_secundaria" in chunk_df.columns:
+        s = chunk_df["cnae_fiscal_secundaria"].dropna().astype(str)
+        bad = ~((s.str.startswith("{") & s.str.endswith("}")) | (s == ""))
+        if bad.any():
+            if settings.strict_fk_validation:
+                raise ValueError("Campo cnae_fiscal_secundaria com formato inválido em algumas linhas. Esperado texto de array PostgreSQL: '{...}'.")
+            else:
+                chunk_df.loc[bad.index[bad], "cnae_fiscal_secundaria"] = None
+                logger.warning("Valores inválidos em cnae_fiscal_secundaria foram definidos como nulos.")
+                fk_violations["cnae_fiscal_secundaria_fmt"] = bad
     return fk_violations
 
 
@@ -237,6 +206,7 @@ class ETLTableConfig(TypedDict, total=False):
     column_names: list[str]
     dtype_map: Dict[str, Any]
     custom_clean_func: Callable[[pd.DataFrame], pd.DataFrame]
+    critical_fields: list[str]
 
 
 ETL_CONFIG: Dict[str, ETLTableConfig] = {
@@ -263,11 +233,14 @@ ETL_CONFIG: Dict[str, ETLTableConfig] = {
             "ente_federativo_responsavel",
         ],
         "dtype_map": {
-            "cnpj_basico": str,
+            "cnpj_basico": pd.StringDtype(),
+            "razao_social": pd.StringDtype(),
+            "ente_federativo_responsavel": pd.StringDtype(),
             "natureza_juridica_codigo": pd.Int64Dtype(),
             "qualificacao_responsavel": pd.Int64Dtype(),
             "porte_empresa": pd.Int64Dtype(),
         },
+        "critical_fields": ["cnpj_basico"],
         "custom_clean_func": clean_empresas_chunk,
     },
         "estabelecimentos": {
@@ -308,37 +281,41 @@ ETL_CONFIG: Dict[str, ETLTableConfig] = {
                 "municipio_source",
             ],
             "dtype_map": {
-                "cnpj_basico": str,
-                "cnpj_ordem": str,
-                "cnpj_dv": str,
+                "cnpj_basico": pd.StringDtype(),
+                "cnpj_ordem": pd.StringDtype(),
+                "cnpj_dv": pd.StringDtype(),
                 "identificador_matriz_filial": pd.Int64Dtype(),
                 "situacao_cadastral": pd.Int64Dtype(),
                 "motivo_situacao_cadastral": pd.Int64Dtype(),
                 "cnae_fiscal_principal_codigo": pd.Int64Dtype(),
-                "cep": str,
-                "uf": str,
+                "cep": pd.StringDtype(),
+                "uf": pd.StringDtype(),
                 "pais_codigo": pd.Int64Dtype(),
-            "municipio_codigo": pd.Int64Dtype(),
-            "municipio_nome": str,
-                "ddd_1": str,
-                "telefone_1": str,
-                "ddd_2": str,
-                "telefone_2": str,
-                "ddd_fax": str,
-                "fax": str,
-                "correio_eletronico": str,
-                "situacao_especial": str,
-                "data_situacao_cadastral": str,
-                "data_inicio_atividade": str,
-                "data_situacao_especial": str,
-                "nome_cidade_exterior": str,
-                "numero": str,
-                "complemento": str,
-                "uf_source": str,
-                "municipio_source": str,
+                "municipio_codigo": pd.Int64Dtype(),
+                "municipio_nome": pd.StringDtype(),
+                "cnae_fiscal_secundaria": pd.StringDtype(),
+                "ddd_1": pd.StringDtype(),
+                "telefone_1": pd.StringDtype(),
+                "ddd_2": pd.StringDtype(),
+                "telefone_2": pd.StringDtype(),
+                "ddd_fax": pd.StringDtype(),
+                "fax": pd.StringDtype(),
+                "correio_eletronico": pd.StringDtype(),
+                "situacao_especial": pd.StringDtype(),
+                "data_situacao_cadastral": pd.StringDtype(),
+                "data_inicio_atividade": pd.StringDtype(),
+                "data_situacao_especial": pd.StringDtype(),
+                "nome_cidade_exterior": pd.StringDtype(),
+                "numero": pd.StringDtype(),
+                "complemento": pd.StringDtype(),
+                "tipo_logradouro": pd.StringDtype(),
+                "logradouro": pd.StringDtype(),
+                "uf_source": pd.StringDtype(),
+                "municipio_source": pd.StringDtype(),
             },
-            "custom_clean_func": clean_estabelecimentos_chunk,
-        },
+        "critical_fields": ["cnpj_basico","cnpj_ordem","cnpj_dv"],
+        "custom_clean_func": clean_estabelecimentos_chunk,
+    },
     "socios": {
         "table_name": "socios",
         "column_names": [
@@ -355,15 +332,18 @@ ETL_CONFIG: Dict[str, ETLTableConfig] = {
             "faixa_etaria",
         ],
         "dtype_map": {
-            "cnpj_basico": str,
+            "cnpj_basico": pd.StringDtype(),
             "identificador_socio": pd.Int64Dtype(),
             "qualificacao_socio_codigo": pd.Int64Dtype(),
-            "cnpj_cpf_socio": str,
-            "representante_legal_cpf": str,
+            "cnpj_cpf_socio": pd.StringDtype(),
+            "representante_legal_cpf": pd.StringDtype(),
             "qualificacao_representante_legal_codigo": pd.Int64Dtype(),
             "faixa_etaria": pd.Int64Dtype(),
             "pais_codigo": pd.Int64Dtype(),
+            "nome_socio_ou_razao_social": pd.StringDtype(),
+            "nome_representante_legal": pd.StringDtype(),
         },
+        "critical_fields": ["cnpj_basico","cnpj_cpf_socio"],
         "custom_clean_func": clean_socios_chunk,
     },
     "simples": {
@@ -377,7 +357,8 @@ ETL_CONFIG: Dict[str, ETLTableConfig] = {
             "data_opcao_pelo_mei",
             "data_exclusao_do_mei",
         ],
-        "dtype_map": {"cnpj_basico": str},
+        "dtype_map": {"cnpj_basico": pd.StringDtype()},
+        "critical_fields": ["cnpj_basico"],
         "custom_clean_func": clean_simples_chunk,
     },
 }
@@ -422,15 +403,8 @@ def _write_json(path: Path, record: dict):
 
 
 def _critical_fields(config_name: str):
-    if config_name == "empresas":
-        return ["cnpj_basico"]
-    if config_name == "estabelecimentos":
-        return ["cnpj_basico", "cnpj_ordem", "cnpj_dv"]
-    if config_name == "socios":
-        return ["cnpj_basico", "cnpj_cpf_socio"]
-    if config_name == "simples":
-        return ["cnpj_basico"]
-    return []
+    cfg = ETL_CONFIG.get(config_name, {})
+    return cfg.get("critical_fields", [])
 
 
 def process_and_load_file(conn: Any, config_name: str) -> None:
@@ -1009,3 +983,26 @@ def run_constraints():
         conn.rollback()
     finally:
         conn.close()
+FK_RULES: Dict[str, list[tuple[str, str | None, str | None]]] = {
+    "empresas": [
+        ("natureza_juridica_codigo","naturezas_juridicas","codigo"),
+        ("qualificacao_responsavel","qualificacoes_socios","codigo"),
+    ],
+    "estabelecimentos": [
+        ("pais_codigo","paises","codigo"),
+        ("municipio_codigo","municipios","codigo"),
+        ("cnae_fiscal_principal_codigo","cnaes","codigo"),
+        ("uf", None, None),
+    ],
+    "socios": [
+        ("pais_codigo","paises","codigo"),
+        ("qualificacao_socio_codigo","qualificacoes_socios","codigo"),
+        ("qualificacao_representante_legal_codigo","qualificacoes_socios","codigo"),
+    ],
+}
+
+DOMAINS_REQUIRED: Dict[str, list[str]] = {
+    "empresas": ["naturezas_juridicas","qualificacoes_socios"],
+    "estabelecimentos": ["paises","municipios","cnaes","empresas"],
+    "socios": ["paises","qualificacoes_socios","empresas"],
+}

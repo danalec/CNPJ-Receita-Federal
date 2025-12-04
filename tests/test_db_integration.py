@@ -7,8 +7,16 @@ from src.settings import settings
 pytestmark = pytest.mark.integration
 
 
+def _db_ready() -> bool:
+    try:
+        import psycopg2
+        with psycopg2.connect(settings.database_uri, connect_timeout=2):
+            return True
+    except Exception:
+        return False
+
 def _should_run_integration() -> bool:
-    return bool(settings.database_uri) and os.environ.get("PG_INTEGRATION") == "1"
+    return bool(settings.database_uri) and os.environ.get("PG_INTEGRATION") == "1" and _db_ready()
 
 
 @pytest.mark.skipif(not _should_run_integration(), reason="Integration tests disabled")

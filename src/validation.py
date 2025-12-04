@@ -6,6 +6,166 @@ from typing import TypeVar, Generic, ClassVar, Any
 from pathlib import Path
 from .settings import settings, UF_SET
 
+CEP_MAP_CACHE = None
+MUN_NAME_MAP_CACHE = None
+
+def _cpf_valid(s: str) -> bool:
+    if not s or len(s) != 11 or s == s[0] * 11:
+        return False
+    nums = [int(x) for x in s]
+    sm1 = sum(nums[i] * (10 - i) for i in range(9))
+    d1 = 0 if sm1 % 11 < 2 else 11 - (sm1 % 11)
+    if nums[9] != d1:
+        return False
+    sm2 = sum(nums[i] * (11 - i) for i in range(10))
+    d2 = 0 if sm2 % 11 < 2 else 11 - (sm2 % 11)
+    return nums[10] == d2
+
+def _cnpj_valid(s: str) -> bool:
+    if not s or len(s) != 14 or s == s[0] * 14:
+        return False
+    nums = [int(x) for x in s]
+    w1 = [5,4,3,2,9,8,7,6,5,4,3,2]
+    sm1 = sum(nums[i] * w1[i] for i in range(12))
+    d1 = 0 if sm1 % 11 < 2 else 11 - (sm1 % 11)
+    if nums[12] != d1:
+        return False
+    w2 = [6,5,4,3,2,9,8,7,6,5,4,3,2]
+    sm2 = sum(nums[i] * w2[i] for i in range(13))
+    d2 = 0 if sm2 % 11 < 2 else 11 - (sm2 % 11)
+    return nums[13] == d2
+
+def _digits_only(s: pd.Series) -> pd.Series:
+    return s.astype(str).str.replace(r"\D+", "", regex=True)
+
+def _strip_empty_to_na(s: pd.Series) -> pd.Series:
+    t = s.astype(str).str.strip()
+    return t.mask(t.eq(""))
+
+def _ensure_len(s: pd.Series, length: int) -> pd.Series:
+    d = _digits_only(s)
+    return d.where(d.str.len().eq(length))
+
+def _normalize_uf(s: pd.Series) -> pd.Series:
+    val = s.astype(str).str.strip().str.upper()
+    return val.where(val.isin(UF_SET))
+
+def _normalize_email(s: pd.Series) -> pd.Series:
+    t = s.astype(str).str.strip().str.lower()
+    return t.where(t.str.contains(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", regex=True))
+
+def _normalize_email_strict(s: pd.Series) -> pd.Series:
+    def norm(x: str | None) -> str | None:
+        if x is None:
+            return None
+        t = str(x).strip()
+        if not t or t.count("@") != 1:
+            return None
+        local, domain = t.split("@", 1)
+        if not local or not domain:
+            return None
+        if local.startswith(".") or local.endswith(".") or ".." in local:
+            return None
+        if not re.fullmatch(r"[A-Za-z0-9._%+-]+", local):
+            return None
+        d = domain.strip().lower().rstrip(".")
+        labels = d.split(".")
+        if len(labels) < 2:
+            return None
+        for lbl in labels:
+            if not re.fullmatch(r"[a-z0-9-]+", lbl):
+                return None
+            if lbl.startswith("-") or lbl.endswith("-") or len(lbl) == 0 or len(lbl) > 63:
+                return None
+        if len(labels[-1]) < 2:
+            return None
+        return local + "@" + ".".join(labels)
+    return s.map(norm)
+
+def _normalize_cnae_code(s: pd.Series) -> pd.Series:
+    d = _digits_only(s)
+    return pd.to_numeric(d.where(d.str.len().eq(7)), errors="coerce").astype("Int64")
+
+def _normalize_pg_array_digits(s: pd.Series) -> pd.Series:
+    def fix(x: str | None) -> str | None:
+        if x is None:
+            return None
+        xs = str(x).strip()
+        if xs == "":
+            return None
+        if xs.startswith("{") and xs.endswith("}"):
+            body = xs[1:-1]
+            tokens = [p.strip() for p in body.split(",")]
+        else:
+            tokens = [p.strip() for p in re.split(r"[;,]", xs) if p.strip()]
+        digits = [re.sub(r"\D+", "", t) for t in tokens]
+        clean = [d for d in digits if len(d) == 7]
+        return ("{" + ",".join(clean) + "}") if clean else None
+    return s.map(fix)
+
+def _dedup_sort_pg_array(s: pd.Series) -> pd.Series:
+    def fix(x: str | None) -> str | None:
+        if x is None:
+            return None
+        xs = str(x).strip()
+        if not xs or not xs.startswith("{") or not xs.endswith("}"):
+            return None
+        body = xs[1:-1]
+        toks = [t for t in body.split(",") if t]
+        try:
+            nums = sorted({int(t) for t in toks})
+        except Exception:
+            return None
+        return ("{" + ",".join(str(n) for n in nums) + "}") if nums else None
+    return s.map(fix)
+
+def _get_cep_map():
+    global CEP_MAP_CACHE
+    if CEP_MAP_CACHE is not None:
+        return CEP_MAP_CACHE
+    p = getattr(settings, "cep_map_path", None)
+    if not p:
+        return None
+    try:
+        path = Path(p)
+        if not path.exists():
+            return None
+        dfm = pd.read_csv(path)
+        cols = set(dfm.columns)
+        required_any = [{"cep","uf","municipio_codigo"}, {"cep_prefix","uf","municipio_codigo"}]
+        if any(s.issubset(cols) for s in required_any):
+            CEP_MAP_CACHE = dfm
+            return CEP_MAP_CACHE
+    except Exception:
+        return None
+    return None
+
+def _get_mun_name_map():
+    global MUN_NAME_MAP_CACHE
+    if MUN_NAME_MAP_CACHE is not None:
+        return MUN_NAME_MAP_CACHE
+    p = getattr(settings, "municipio_name_map_path", None)
+    if not p:
+        return None
+    try:
+        path = Path(p)
+        if not path.exists():
+            return None
+        dfm = pd.read_csv(path)
+        cols = set(dfm.columns)
+        if {"municipio_nome","municipio_codigo"}.issubset(cols):
+            MUN_NAME_MAP_CACHE = dfm
+            return MUN_NAME_MAP_CACHE
+    except Exception:
+        return None
+    return None
+
+def _normalize_name_series(s: pd.Series) -> pd.Series:
+    t = s.astype(str).str.strip().str.lower()
+    def deacc(x: str) -> str:
+        return "".join(c for c in unicodedata.normalize("NFKD", x) if not unicodedata.combining(c))
+    return t.map(deacc)
+
 T = TypeVar("T")
 class PanderaSeries(Generic[T]):
     pass
@@ -332,184 +492,25 @@ def validate(config_name: str, df: pd.DataFrame):
     snapshot = {c: df[c].astype(str).copy() for c in cols_for_diff if c in df.columns}
     masks: dict[str, pd.Series] = {}
 
-    def _cpf_valid(s: str) -> bool:
-        if not s or len(s) != 11 or s == s[0] * 11:
-            return False
-        nums = [int(x) for x in s]
-        sm1 = sum(nums[i] * (10 - i) for i in range(9))
-        d1 = 0 if sm1 % 11 < 2 else 11 - (sm1 % 11)
-        if nums[9] != d1:
-            return False
-        sm2 = sum(nums[i] * (11 - i) for i in range(10))
-        d2 = 0 if sm2 % 11 < 2 else 11 - (sm2 % 11)
-        return nums[10] == d2
-
-    def _cnpj_valid(s: str) -> bool:
-        if not s or len(s) != 14 or s == s[0] * 14:
-            return False
-        nums = [int(x) for x in s]
-        w1 = [5,4,3,2,9,8,7,6,5,4,3,2]
-        sm1 = sum(nums[i] * w1[i] for i in range(12))
-        d1 = 0 if sm1 % 11 < 2 else 11 - (sm1 % 11)
-        if nums[12] != d1:
-            return False
-        w2 = [6,5,4,3,2,9,8,7,6,5,4,3,2]
-        sm2 = sum(nums[i] * w2[i] for i in range(13))
-        d2 = 0 if sm2 % 11 < 2 else 11 - (sm2 % 11)
-        return nums[13] == d2
-
-    def _digits_only(s: pd.Series) -> pd.Series:
-        return s.astype(str).str.replace(r"\D+", "", regex=True)
-
-    def _strip_empty_to_na(s: pd.Series) -> pd.Series:
-        t = s.astype(str).str.strip()
-        return t.mask(t.eq(""))
-
-    def _ensure_len(s: pd.Series, length: int) -> pd.Series:
-        d = _digits_only(s)
-        return d.where(d.str.len().eq(length))
-
-    def _normalize_uf(s: pd.Series) -> pd.Series:
-        val = s.astype(str).str.strip().str.upper()
-        return val.where(val.isin(UF_SET))
-
-    def _normalize_email(s: pd.Series) -> pd.Series:
-        t = s.astype(str).str.strip().str.lower()
-        return t.where(t.str.contains(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", regex=True))
-
-    def _normalize_email_strict(s: pd.Series) -> pd.Series:
-        def norm(x: str | None) -> str | None:
-            if x is None:
-                return None
-            t = str(x).strip()
-            if not t or t.count("@") != 1:
-                return None
-            local, domain = t.split("@", 1)
-            if not local or not domain:
-                return None
-            if local.startswith(".") or local.endswith(".") or ".." in local:
-                return None
-            if not re.fullmatch(r"[A-Za-z0-9._%+-]+", local):
-                return None
-            d = domain.strip().lower().rstrip(".")
-            labels = d.split(".")
-            if len(labels) < 2:
-                return None
-            for lbl in labels:
-                if not re.fullmatch(r"[a-z0-9-]+", lbl):
-                    return None
-                if lbl.startswith("-") or lbl.endswith("-") or len(lbl) == 0 or len(lbl) > 63:
-                    return None
-            if len(labels[-1]) < 2:
-                return None
-            return local + "@" + ".".join(labels)
-        return s.map(norm)
-
-    def _normalize_cnae_code(s: pd.Series) -> pd.Series:
-        d = _digits_only(s)
-        return pd.to_numeric(d.where(d.str.len().eq(7)), errors="coerce").astype("Int64")
-
-    def _normalize_pg_array_digits(s: pd.Series) -> pd.Series:
-        def fix(x: str | None) -> str | None:
-            if x is None:
-                return None
-            xs = str(x).strip()
-            if xs == "":
-                return None
-            # Accept either raw tokens or PostgreSQL array text
-            if xs.startswith("{") and xs.endswith("}"):
-                body = xs[1:-1]
-                tokens = [p.strip() for p in body.split(",")]
-            else:
-                tokens = [p.strip() for p in re.split(r"[;,]", xs) if p.strip()]
-            digits = [re.sub(r"\D+", "", t) for t in tokens]
-            clean = [d for d in digits if len(d) == 7]
-            return ("{" + ",".join(clean) + "}") if clean else None
-        return s.map(fix)
-
-    def _dedup_sort_pg_array(s: pd.Series) -> pd.Series:
-        def fix(x: str | None) -> str | None:
-            if x is None:
-                return None
-            xs = str(x).strip()
-            if not xs or not xs.startswith("{") or not xs.endswith("}"):
-                return None
-            body = xs[1:-1]
-            toks = [t for t in body.split(",") if t]
-            try:
-                nums = sorted({int(t) for t in toks})
-            except Exception:
-                return None
-            return ("{" + ",".join(str(n) for n in nums) + "}") if nums else None
-        return s.map(fix)
-
-    CEP_MAP_CACHE = None
-    def _get_cep_map():
-        nonlocal CEP_MAP_CACHE
-        if CEP_MAP_CACHE is not None:
-            return CEP_MAP_CACHE
-        p = getattr(settings, "cep_map_path", None)
-        if not p:
-            return None
-        try:
-            path = Path(p)
-            if not path.exists():
-                return None
-            dfm = pd.read_csv(path)
-            cols = set(dfm.columns)
-            required_any = [{"cep","uf","municipio_codigo"}, {"cep_prefix","uf","municipio_codigo"}]
-            if any(s.issubset(cols) for s in required_any):
-                CEP_MAP_CACHE = dfm
-                return CEP_MAP_CACHE
-        except Exception:
-            return None
-        return None
-
-    MUN_NAME_MAP_CACHE = None
-    def _get_mun_name_map():
-        nonlocal MUN_NAME_MAP_CACHE
-        if MUN_NAME_MAP_CACHE is not None:
-            return MUN_NAME_MAP_CACHE
-        p = getattr(settings, "municipio_name_map_path", None)
-        if not p:
-            return None
-        try:
-            path = Path(p)
-            if not path.exists():
-                return None
-            dfm = pd.read_csv(path)
-            cols = set(dfm.columns)
-            if {"municipio_nome","municipio_codigo"}.issubset(cols):
-                MUN_NAME_MAP_CACHE = dfm
-                return MUN_NAME_MAP_CACHE
-        except Exception:
-            return None
-        return None
-
-    def _normalize_name_series(s: pd.Series) -> pd.Series:
-        t = s.astype(str).str.strip().str.lower()
-        def deacc(x: str) -> str:
-            return "".join(c for c in unicodedata.normalize("NFKD", x) if not unicodedata.combining(c))
-        return t.map(deacc)
+    helpers = {
+        "cpf_valid": _cpf_valid,
+        "cnpj_valid": _cnpj_valid,
+        "digits_only": _digits_only,
+        "strip_empty_to_na": _strip_empty_to_na,
+        "ensure_len": _ensure_len,
+        "normalize_uf": _normalize_uf,
+        "normalize_email": _normalize_email,
+        "normalize_email_strict": _normalize_email_strict,
+        "normalize_cnae_code": _normalize_cnae_code,
+        "normalize_pg_array_digits": _normalize_pg_array_digits,
+        "dedup_sort_pg_array": _dedup_sort_pg_array,
+        "get_cep_map": _get_cep_map,
+        "get_mun_name_map": _get_mun_name_map,
+        "normalize_name_series": _normalize_name_series,
+    }
     schema = SCHEMA_MAP.get(config_name)
     extras: dict[str, Any] = {}
     if schema is not None:
-        helpers = {
-            "cpf_valid": _cpf_valid,
-            "cnpj_valid": _cnpj_valid,
-            "digits_only": _digits_only,
-            "strip_empty_to_na": _strip_empty_to_na,
-            "ensure_len": _ensure_len,
-            "normalize_uf": _normalize_uf,
-            "normalize_email": _normalize_email,
-            "normalize_email_strict": _normalize_email_strict,
-            "normalize_cnae_code": _normalize_cnae_code,
-            "normalize_pg_array_digits": _normalize_pg_array_digits,
-            "dedup_sort_pg_array": _dedup_sort_pg_array,
-            "get_cep_map": _get_cep_map,
-            "get_mun_name_map": _get_mun_name_map,
-            "normalize_name_series": _normalize_name_series,
-        }
         df, masks, extras = schema.clean(df, level, settings, helpers)
 
     after_nulls = {c: int(df[c].isna().sum()) for c in df.columns}
