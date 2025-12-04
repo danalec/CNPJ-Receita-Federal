@@ -312,10 +312,14 @@ def process_and_load_file(conn, config_name) -> None:
         names=etl_config["column_names"],
         dtype=etl_config.get("dtype_map", None),
         chunksize=settings.chunk_size,
+        on_bad_lines=("skip" if getattr(settings, "csv_filter", True) else "error"),
     )
 
     total_rows = 0
     for i, chunk in enumerate(reader):
+        if getattr(settings, "csv_filter", True):
+            chunk = chunk.replace(r"^\s*$", pd.NA, regex=True)
+            chunk = chunk.dropna(how="all")
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
 

@@ -1,21 +1,30 @@
 import json
 import logging
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from typing import Literal, Dict, Optional
 from enum import Enum
 from pydantic_settings import BaseSettings, SettingsConfigDict, Field
-from pydantic import computed_field
+from pydantic import computed_field, AliasChoices
+from urllib.parse import urlparse
 
 
 def setup_logging():
     log_file = settings.log_dir / "cnpj.log"
+    file_handler = TimedRotatingFileHandler(
+        log_file,
+        when="midnight",
+        interval=1,
+        backupCount=settings.log_backup_count,
+        encoding="utf-8",
+    )
     logging.basicConfig(
         level=getattr(logging, settings.log_level),
         format="%(levelname)s - %(asctime)s - [%(name)s] - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
-            logging.FileHandler(log_file, mode="w"),
+            file_handler,
             logging.StreamHandler(),
         ],
     )
@@ -50,6 +59,7 @@ class Settings(BaseSettings):
     rfb_base_url: str = Field(
         default="https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/",
         description="URL Base da Receita Federal onde ficam as pastas por data.",
+        validation_alias=AliasChoices("RFB_BASE_URL"),
     )
 
     target_date: str = Field(
@@ -61,11 +71,34 @@ class Settings(BaseSettings):
     )
 
     # --- Banco de Dados (Obrigatórios) ---
-    postgres_user: str = Field(description="Usuário do PostgreSQL.")
-    postgres_password: str = Field(description="Senha do PostgreSQL.")
-    postgres_host: str = Field(description="Host do banco (ex: localhost, db).")
-    postgres_port: int = Field(default=5432, description="Porta do banco.")
-    postgres_database: str = Field(description="Nome do banco de dados.")
+    postgres_user: str = Field(
+        description="Usuário do PostgreSQL.",
+        validation_alias=AliasChoices("POSTGRES_USER", "PGUSER"),
+    )
+    postgres_password: str = Field(
+        description="Senha do PostgreSQL.",
+        validation_alias=AliasChoices("POSTGRES_PASSWORD", "PGPASSWORD"),
+    )
+    postgres_host: str = Field(
+        description="Host do banco (ex: localhost, db).",
+        validation_alias=AliasChoices("POSTGRES_HOST", "PGHOST"),
+    )
+    postgres_port: int = Field(
+        default=5432,
+        description="Porta do banco.",
+        validation_alias=AliasChoices("POSTGRES_PORT", "PGPORT"),
+    )
+    postgres_database: str = Field(
+        description="Nome do banco de dados.",
+        validation_alias=AliasChoices("POSTGRES_DATABASE", "PGDATABASE"),
+    )
+
+    # --- URL de conexão completa (opcional) ---
+    database_url: Optional[str] = Field(
+        default=None,
+        description="URL completa de conexão (ex.: postgresql://user:pass@host:port/db).",
+        validation_alias=AliasChoices("DATABASE_URL"),
+    )
 
     # --- Performance de Download/Extração ---
     max_workers: int = Field(
@@ -139,6 +172,18 @@ class Settings(BaseSettings):
         default="INFO", description="Nível de detalhe dos logs."
     )
 
+    # --- Rotação de logs ---
+    log_backup_count: int = Field(
+        default=7,
+        description="Quantidade de arquivos de log mantidos na rotação diária.",
+    )
+
+    # --- Filtro de CSV ---
+    csv_filter: bool = Field(
+        default=True,
+        description="Pula linhas malformadas e descarta linhas completamente vazias.",
+    )
+
     @computed_field
     def download_url(self) -> str:
         """Monta a URL completa baseada na data alvo."""
@@ -175,6 +220,22 @@ class Settings(BaseSettings):
             f":{self.postgres_port}"
             f"/{self.postgres_database}"
         )
+
+    def model_post_init(self, __context) -> None:
+        # Se DATABASE_URL estiver definido, sobrepõe os campos de conexão
+        if self.database_url:
+            parsed = urlparse(self.database_url)
+            if parsed.scheme.startswith("postgres"):
+                if parsed.username:
+                    object.__setattr__(self, "postgres_user", parsed.username)
+                if parsed.password:
+                    object.__setattr__(self, "postgres_password", parsed.password)
+                if parsed.hostname:
+                    object.__setattr__(self, "postgres_host", parsed.hostname)
+                if parsed.port:
+                    object.__setattr__(self, "postgres_port", parsed.port)
+                if parsed.path and len(parsed.path) > 1:
+                    object.__setattr__(self, "postgres_database", parsed.path.lstrip("/"))
 
     def create_dirs(self):
         """Garante que a estrutura de pastas exista."""

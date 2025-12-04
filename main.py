@@ -11,7 +11,7 @@ from src import (
     database_loader,
     check_update,
 )
-from src.settings import setup_logging, state, PipelineStep, StepStatus
+from src.settings import setup_logging, state, PipelineStep, StepStatus, settings
 
 setup_logging()
 logger = logging.getLogger("orchestrator")
@@ -67,6 +67,32 @@ if __name__ == "__main__":
     parser.add_argument(
         "--force", action="store_true", help="Ignora o histórico e roda tudo."
     )
+    parser.add_argument(
+        "--step",
+        choices=[s.value for s in PipelineStep],
+        help="Executa apenas a etapa especificada do pipeline",
+    )
+    parser.add_argument(
+        "--no-csv-filter",
+        action="store_true",
+        help="Desabilita filtros de CSV (linhas malformadas e vazias)",
+    )
     args = parser.parse_args()
+    if args.no_csv_filter:
+        settings.csv_filter = False
 
-    run_pipeline(force=args.force)
+    if args.step:
+        step_value = args.step
+        if step_value == PipelineStep.CHECK.value:
+            check_update.run_check_step()
+        else:
+            func = PIPELINE_MAP.get(PipelineStep(step_value))
+            if func:
+                state.update(PipelineStep(step_value), StepStatus.RUNNING)
+                func()
+                state.update(PipelineStep(step_value), StepStatus.COMPLETED)
+            else:
+                logger.error(f"Etapa desconhecida: {step_value}")
+                sys.exit(2)
+    else:
+        run_pipeline(force=args.force)
