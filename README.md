@@ -1,118 +1,113 @@
-# CNPJ Dados Abertos - Pipeline de `ETL` para PostgreSQL
+# CNPJ Dados Abertos — Pipeline de ETL para PostgreSQL
 
-Este projeto é uma ferramenta de `ETL` (Extract, Transform, Load) de alto desempenho projetada para automatizar o processo de baixar, tratar e carregar os dados públicos de CNPJ.
+Ferramenta de ETL (Extract, Transform, Load) de alto desempenho para automatizar o download, tratamento e carga dos dados públicos de CNPJ
+[disponibilizados pela Receita Federal do Brasil](https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/).
 
-[(disponibilizados pela Receita Federal do Brasil)](https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/)
+Foco em **performance** e **robustez** usando `COPY FROM STDIN`, tabelas `UNLOGGED` e processamento em _chunks_ via Pandas. O pipeline é **modular**: se uma etapa falhar, corrija o problema e recomece diretamente do módulo correspondente.
 
-O foco principal é **performance**, utilizando técnicas como `COPY FROM STDIN`, tabelas `UNLOGGED` e tratamento de dados em _chunks_ via Pandas.
-
-As vezes há **Problemas de integridade**, como é o caso da versão `2025-11`. Que faltou o código de país `150`. Ou caso tenha algum problema de faltar chaves estrangeiras como um sócio que não consta. Não há problemas os dados já estão inseridos. Caso aconteça, basta corrigir o problema no banco de dados e executar `constraints.sql`. Para definir as constraints e ter um banco de dados integro.
-
-O script é **totalmente modular**, caso falhe em alguma etapa basta corrigir o problema e executar o módulo de onde parou.
+> Nota de integridade: em algumas versões a Receita pode publicar dados com lacunas. Ex.: versão `2025-11` sem o código de país `150`. Se houver chaves estrangeiras ausentes (ex.: sócio sem domínio correspondente), os dados já terão sido carregados; corrija a lacuna diretamente no banco e execute `constraints.sql` para aplicar/reaplicar restrições e garantir um banco **íntegro**.
 
 ```bash
-python -m src.modulo
+python -m src.<modulo>
 ```
 
-# 🚀 Fluxo de dados
+## ⚡ TL;DR (Como rodar)
 
-## 1. Verificação Automática
+1. PostgreSQL instalado e com pelo menos ~80GB livres.
+2. `poetry install` e configure o `.env` (veja exemplo abaixo).
+3. Execute `python -m src.check_update` ou rode `main.py` para checar e processar novas versões automaticamente.
+4. Em caso de inconsistências, corrija os dados de domínio e rode `constraints.sql`.
 
-Checa o site da Receita Federal para identificar se há uma nova versão dos dados disponível comparada à versão local. A data de processamento da última versão disponível fica em `data/last_version_processed.txt`
+## 🚀 Fluxo de Dados
 
-Você pode adicionar o `main.py` ao seu `crontab ` ele checa se há atualizações, se tiver ele inicia o pipeline de processamento.
+1. Verificação Automática
+   - Compara a versão online com a última processada em `data/last_version_processed.txt`.
+   - Pode ser agendado (cron) apontando para `main.py`.
+   - Módulo: `check_update.py`.
 
-**Modulo responsável: `check_update.py`**
+2. Download
+   - Multi-thread (até 4 conexões simultâneas) com controle opcional de taxa.
+   - Módulo: `downloader.py`.
 
-## 2. Download dos dados
+3. Descompactação
+   - Extrai os `.zip` publicados em partes (ex.: `empresas01.zip`, `empresas02.zip`), consolidando a saída em uma pasta única.
+   - Módulo: `extract_files.py`.
 
-**Download dos arquivos** em multi-thread, máximo de 4 para evitar abusos de conexões simultâneas.
+4. Consolidação de CSVs
+   - Agrupa os CSVs descompactados em **um arquivo por categoria**, simplificando a carga.
+   - Módulo: `consolidate_csv.py`.
 
-**Módulo responsável: `downloader.py`**
-
-## 3. Descompactação
-
-Descompacta arquivos baixados que por padrão são dívidos em vários arquivos `.zip`. Extrai agrupando o resultado em uma única pasta, normalmente os dados vem com um nome prefixado e as versões, `empresas01.zip`, `empresas02.zip` etc...
-
-**Módulo responsável: `extract_files.py`**
-
-## 4. Consolidação dos arquivos `CSVs`
-
-Agrupo os `CSVs` descompactados em único arquivo, único por categoria, removendo a necessidade de lidar com múltiplos arquivos durante a carga.
-
-**Módulo responsável: `consolidate_csv.py`**
-
-## 5. Carga para o Banco de dados
-
-Utiliza o comando `COPY` do PostgreSQL (via driver `psycopg`) para inserção em massa.
-
-Cria tabelas como `UNLOGGED` para acelerar a escrita inicial.
-Realiza a limpeza de dados (conversão de datas, formatação de arrays para `CNAEs`, sanitização de decimais etc...)
-
-Aplicação de Chaves Primárias, Estrangeiras e Índices **após** a carga para maximizar a velocidade.
-
-Schema Otimizado Separação clara entre SQL de definição (`DDL`) e código Python.
-
-**Módulo responsável: `database_loader.py`**
+5. Carga no Banco
+   - Inserção em massa via `psycopg` com `COPY FROM STDIN`.
+   - Tabelas `UNLOGGED` para acelerar a escrita inicial.
+   - Limpeza de dados: conversões de data, arrays para CNAEs, decimais, etc.
+   - Aplicação de PKs, FKs e índices **após** a carga.
+   - Módulo: `database_loader.py`.
 
 ## ⚙️ Configuração e Instalação
 
-### 1. Pré-requisitos
+### Pré-requisitos
 
 - PostgreSQL instalado e rodando.
-- **Espaço em disco:** Recomenda-se pelo menos **80GB livres** (Arquivos compactados + Extraídos + Banco de Dados).
+- **Espaço em disco:** recomenda-se **80GB livres** (compactados + extraídos + banco).
 
-### 2. Instalação
+### Instalação
 
 ```bash
-# Clone o repositório
 git clone https://github.com/FolcloreX/CNPJ-Receita-Federal
 cd CNPJ-Receita-Federal
-
-# Instale as dependências com Poetry
 poetry install
 poetry shell
 ```
 
-### 3. Configuração
+### Configuração (.env)
 
-Crie um arquivo `.env` na raiz do projeto, existe um exemplo `.env.example` que você também pode renomear. Em `settings.py` há mais configurações opcionais.
+Crie `.env` na raiz (ou renomeie `.env.example`). Há opções adicionais em `settings.py`.
 
 ```text
 # URL RFB
 RFB_BASE_URL="https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/"
 
-# Database configuration
+# Database
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_DATABASE=Dados_RFB
 
-# File configuration
+# Arquivos e processamento
 FILE_ENCODING=latin1
 CHUNK_SIZE=200_000
 
-# Logging configuration
+# Logging e rede
 LOG_LEVEL=INFO
 RATE_LIMIT_PER_SEC=0
 VERIFY_ZIP_INTEGRITY=true
 ```
 
-### Notas de Performance e Robustez
+## 📈 Performance e Robustez
 
-- Dependências são instaladas via `requirements.txt` e `requirements-dev.txt` para evitar divergência entre CI e Docker.
-- Downloads podem ser limitados por taxa definindo `RATE_LIMIT_PER_SEC` (>0) e são verificados com integridade de ZIP.
+- `UNLOGGED` acelera a escrita inicial; restrições e índices são aplicados depois.
+- `COPY FROM STDIN` minimiza overhead de INSERTs individuais.
+- Processamento em _chunks_ evita estouro de memória em arquivos grandes.
+- `RATE_LIMIT_PER_SEC` (>0) ativa limitação de taxa de download.
+- Verificação de integridade dos ZIPs (`VERIFY_ZIP_INTEGRITY=true`).
 
-### Testes
+## ✅ Testes
 
-- Unitários: `pytest -q` (CI executa com cobertura).
-- Integração (opcional, requer Postgres): defina `PG_INTEGRATION=1` e variáveis de DB no `.env`, então rode `pytest -q -m integration`.
+- Unitários: `pytest -q`.
+- Integração (requer Postgres): defina `PG_INTEGRATION=1` e variáveis de banco no `.env`, então rode `pytest -q -m integration`.
 
-## 📊 Diagrama do Banco de Dados (ER)
+## 🧭 Erros Comuns e Soluções
 
-Também pode ser visualizado em um PDF direto no [Site da receita](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf)
-Há uma versão em markdown em `docs`.
+- Códigos de domínio ausentes (ex.: países): insira/ajuste no domínio e reexecute `constraints.sql`.
+- Falha na integridade de ZIP: rebaixe o arquivo; ative `VERIFY_ZIP_INTEGRITY`.
+- Encoding: ajuste `FILE_ENCODING` conforme arquivo (default `latin1`).
+- Espaço insuficiente: limpe a pasta de extração/temporários antes de reprocessar.
+
+## 📊 Diagrama do Banco (ER)
+
+Visualize também o PDF oficial da Receita: [CNPJ Metadados](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf). Há uma versão em Markdown em `docs`.
 
 ```mermaid
 erDiagram
@@ -236,4 +231,4 @@ erDiagram
 
 ## 🤝 Contribuição
 
-Sinta-se à vontade para abrir Issues relatando inconsistências nos dados da Receita ou enviar `PRs` com melhorias de performance.
+Abra issues para relatar inconsistências nos dados da Receita ou envie PRs com melhorias de performance e confiabilidade.
