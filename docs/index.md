@@ -88,6 +88,7 @@ LOG_BACKUP_COUNT=7
 - Guia de Docker: [docker.md](docker.md)
 - Rotação de User-Agent (Downloader): [user-agent.md](user-agent.md)
 - Download dos dados (multithread): [download.md](download.md)
+- AUTO-REPAIR: Normalização e Telemetria: [auto-repair.md](auto-repair.md)
 - Visão geral e início rápido: [README.md](../README.md)
 
 ## Renderização do Diagrama ER

@@ -89,6 +89,7 @@ CREATE UNLOGGED TABLE rfb.estabelecimentos (
     cep CHAR(8),
     uf CHAR(2),
     municipio_codigo SMALLINT,
+    municipio_nome VARCHAR(150),
     ddd_1 VARCHAR(4),
     telefone_1 VARCHAR(9),
     ddd_2 VARCHAR(4),
@@ -97,7 +98,9 @@ CREATE UNLOGGED TABLE rfb.estabelecimentos (
     fax VARCHAR(9),
     correio_eletronico VARCHAR(255),
     situacao_especial VARCHAR(100),
-    data_situacao_especial DATE
+    data_situacao_especial DATE,
+    uf_source VARCHAR(20),
+    municipio_source VARCHAR(20)
 );
 
 CREATE UNLOGGED TABLE rfb.simples (

@@ -3,8 +3,9 @@ import logging
 import io
 import re
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import psycopg2
+import requests
 from psycopg2 import sql
 from pathlib import Path
 from typing import Dict, Tuple, Set, Union
@@ -260,69 +261,75 @@ ETL_CONFIG = {
         },
         "custom_clean_func": clean_empresas_chunk,
     },
-    "estabelecimentos": {
-        "table_name": "estabelecimentos",
-        "column_names": [
-            "cnpj_basico",
-            "cnpj_ordem",
-            "cnpj_dv",
-            "identificador_matriz_filial",
-            "nome_fantasia",
-            "situacao_cadastral",
-            "data_situacao_cadastral",
-            "motivo_situacao_cadastral",
-            "nome_cidade_exterior",
-            "pais_codigo",
-            "data_inicio_atividade",
-            "cnae_fiscal_principal_codigo",
-            "cnae_fiscal_secundaria",
-            "tipo_logradouro",
-            "logradouro",
-            "numero",
-            "complemento",
-            "bairro",
-            "cep",
-            "uf",
+        "estabelecimentos": {
+            "table_name": "estabelecimentos",
+            "column_names": [
+                "cnpj_basico",
+                "cnpj_ordem",
+                "cnpj_dv",
+                "identificador_matriz_filial",
+                "nome_fantasia",
+                "situacao_cadastral",
+                "data_situacao_cadastral",
+                "motivo_situacao_cadastral",
+                "nome_cidade_exterior",
+                "pais_codigo",
+                "data_inicio_atividade",
+                "cnae_fiscal_principal_codigo",
+                "cnae_fiscal_secundaria",
+                "tipo_logradouro",
+                "logradouro",
+                "numero",
+                "complemento",
+                "bairro",
+                "cep",
+                "uf",
             "municipio_codigo",
-            "ddd_1",
-            "telefone_1",
-            "ddd_2",
-            "telefone_2",
-            "ddd_fax",
-            "fax",
-            "correio_eletronico",
-            "situacao_especial",
-            "data_situacao_especial",
-        ],
-        "dtype_map": {
-            "cnpj_basico": str,
-            "cnpj_ordem": str,
-            "cnpj_dv": str,
-            "identificador_matriz_filial": pd.Int64Dtype(),
-            "situacao_cadastral": pd.Int64Dtype(),
-            "motivo_situacao_cadastral": pd.Int64Dtype(),
-            "cnae_fiscal_principal_codigo": pd.Int64Dtype(),
-            "cep": str,
-            "uf": str,
-            "pais_codigo": pd.Int64Dtype(),
+            "municipio_nome",
+                "ddd_1",
+                "telefone_1",
+                "ddd_2",
+                "telefone_2",
+                "ddd_fax",
+                "fax",
+                "correio_eletronico",
+                "situacao_especial",
+                "data_situacao_especial",
+                "uf_source",
+                "municipio_source",
+            ],
+            "dtype_map": {
+                "cnpj_basico": str,
+                "cnpj_ordem": str,
+                "cnpj_dv": str,
+                "identificador_matriz_filial": pd.Int64Dtype(),
+                "situacao_cadastral": pd.Int64Dtype(),
+                "motivo_situacao_cadastral": pd.Int64Dtype(),
+                "cnae_fiscal_principal_codigo": pd.Int64Dtype(),
+                "cep": str,
+                "uf": str,
+                "pais_codigo": pd.Int64Dtype(),
             "municipio_codigo": pd.Int64Dtype(),
-            "ddd_1": str,
-            "telefone_1": str,
-            "ddd_2": str,
-            "telefone_2": str,
-            "ddd_fax": str,
-            "fax": str,
-            "correio_eletronico": str,
-            "situacao_especial": str,
-            "data_situacao_cadastral": str,
-            "data_inicio_atividade": str,
-            "data_situacao_especial": str,
-            "nome_cidade_exterior": str,
-            "numero": str,
-            "complemento": str,
+            "municipio_nome": str,
+                "ddd_1": str,
+                "telefone_1": str,
+                "ddd_2": str,
+                "telefone_2": str,
+                "ddd_fax": str,
+                "fax": str,
+                "correio_eletronico": str,
+                "situacao_especial": str,
+                "data_situacao_cadastral": str,
+                "data_inicio_atividade": str,
+                "data_situacao_especial": str,
+                "nome_cidade_exterior": str,
+                "numero": str,
+                "complemento": str,
+                "uf_source": str,
+                "municipio_source": str,
+            },
+            "custom_clean_func": clean_estabelecimentos_chunk,
         },
-        "custom_clean_func": clean_estabelecimentos_chunk,
-    },
     "socios": {
         "table_name": "socios",
         "column_names": [
@@ -370,10 +377,10 @@ ETL_CONFIG = {
 
 
 def _jsonl_dir(kind: str) -> Path:
-    base = settings.telemetry_dir if kind == "telemetry" else settings.quarantine_dir
+    base = settings.auto_repair_dir if kind == "telemetry" else settings.quarantine_dir
     rotate = settings.telemetry_rotate_daily if kind == "telemetry" else settings.quarantine_rotate_daily
     if rotate:
-        d = datetime.utcnow().strftime("%Y%m%d")
+        d = datetime.now(timezone.utc).strftime("%Y%m%d")
         return base / d
     return base
 
@@ -397,6 +404,12 @@ def _write_jsonl(kind: str, config_name: str, record: dict):
     path = _select_jsonl_file(dir_path, config_name, max_bytes)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _write_json(path: Path, record: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(record, f, ensure_ascii=False)
 
 
 def _critical_fields(config_name: str):
@@ -438,19 +451,80 @@ def process_and_load_file(conn, config_name):
     )
 
     total_rows = 0
+    gate_level_name = getattr(settings, "gate_log_level", "WARNING")
+    gate_level = logging.WARNING if str(gate_level_name).upper() == "WARNING" else logging.INFO
+    changed_totals: Dict[str, int] = {}
+    null_delta_totals: Dict[str, int] = {}
+    quality_gate_chunks = 0
+    invalid_cnpj_rows = 0
+    chunks_processed = 0
+    column_stats: Dict[str, Dict[str, Union[int, str]]] = {}
     for i, chunk in enumerate(reader):
+        chunk_start = datetime.now(timezone.utc)
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
         chunk, telemetry, masks = schema_validate(config_name, chunk)
+        rows_count = int(len(chunk))
         telemetry_record = {
             "table": table_name,
             "config": config_name,
             "chunk": i + 1,
-            "rows": int(len(chunk)),
-            "timestamp": datetime.utcnow().isoformat(),
+            "rows": rows_count,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "duration_ms": int((datetime.now(timezone.utc) - chunk_start).total_seconds() * 1000),
             **telemetry,
         }
-        _write_jsonl("telemetry", config_name, telemetry_record)
+        if getattr(settings, "enable_quality_gates", True) and rows_count > 0:
+            triggers = {}
+            changed = telemetry.get("changed_counts", {}) or {}
+            deltas = telemetry.get("null_deltas", {}) or {}
+            for c, n in changed.items():
+                try:
+                    ratio = (int(n) / rows_count)
+                except Exception:
+                    ratio = 0.0
+                if ratio > getattr(settings, "gate_max_changed_ratio", 0.3):
+                    triggers[c] = {"type": "changed", "ratio": ratio, "count": int(n)}
+            for c, d in deltas.items():
+                try:
+                    ratio = (abs(int(d)) / rows_count)
+                except Exception:
+                    ratio = 0.0
+                if ratio > getattr(settings, "gate_max_null_delta_ratio", 0.3):
+                    if c in triggers:
+                        triggers[c]["null_delta_ratio"] = ratio
+                        triggers[c]["null_delta"] = int(d)
+                    else:
+                        triggers[c] = {"type": "null_delta", "ratio": ratio, "delta": int(d)}
+            if triggers:
+                telemetry_record["quality_gate"] = {"trigger_columns": triggers, "rows": rows_count}
+                _write_jsonl("telemetry", config_name, telemetry_record)
+                _write_jsonl(
+                    "quarantine",
+                    config_name,
+                    {
+                        "table": table_name,
+                        "config": config_name,
+                        "chunk": i + 1,
+                        "reason": "quality_gate",
+                        "trigger_columns": triggers,
+                        "rows": rows_count,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+                quality_gate_chunks += 1
+                logger.log(gate_level, f"Chunk {i + 1}: quality gate triggered; skipping chunk.")
+                continue
+        else:
+            _write_jsonl("telemetry", config_name, telemetry_record)
+
+        for c, n in (telemetry.get("changed_counts", {}) or {}).items():
+            changed_totals[c] = changed_totals.get(c, 0) + int(n)
+        for c, d in (telemetry.get("null_deltas", {}) or {}).items():
+            try:
+                null_delta_totals[c] = null_delta_totals.get(c, 0) + int(d)
+            except Exception:
+                pass
 
         crit = _critical_fields(config_name)
         if crit:
@@ -472,7 +546,7 @@ def process_and_load_file(conn, config_name):
                                     "reason": "critical_fields_null",
                                     "fields": cols,
                                     "row": rec,
-                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "timestamp": datetime.now(timezone.utc).isoformat(),
                                 },
                             )
                     except Exception:
@@ -492,12 +566,23 @@ def process_and_load_file(conn, config_name):
                             "reason": "invalid_cnpj",
                             "fields": ["cnpj_basico","cnpj_ordem","cnpj_dv"],
                             "row": rec,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                         },
                     )
             except Exception:
                 pass
-        fk_info = validate_chunk(config_name, chunk, conn)
+            skip_count = int(masks["invalid_cnpj"].sum())
+            if skip_count:
+                chunk = chunk.loc[~masks["invalid_cnpj"]].copy()
+                logger.info(f"Chunk {i + 1}: skipped {skip_count} estabelecimentos rows due to invalid CNPJ.")
+                invalid_cnpj_rows += skip_count
+                if len(chunk) == 0:
+                    logger.info(f"Chunk {i + 1}: no rows left after skip; continuing.")
+                    continue
+        try:
+            fk_info = validate_chunk(config_name, chunk, conn)
+        except ValueError as e:
+            raise ValueError(f"{str(e)} | telemetry_after={json.dumps(telemetry, ensure_ascii=False)}")
         if isinstance(fk_info, dict) and fk_info:
             for label, mask in fk_info.items():
                 try:
@@ -523,9 +608,76 @@ def process_and_load_file(conn, config_name):
         # Passa a conexão direta
         fast_load_chunk(conn, chunk, table_name)
 
+        for col in chunk.columns:
+            s = chunk[col]
+            nulls = int(s.isna().sum())
+            cs = column_stats.get(col)
+            if cs is None:
+                cs = {"nulls": 0, "min": None, "max": None}
+                column_stats[col] = cs
+            cs["nulls"] = int(cs["nulls"]) + nulls
+            vmin = None
+            vmax = None
+            try:
+                vmin = s.dropna().min()
+                vmax = s.dropna().max()
+            except Exception:
+                vmin = None
+                vmax = None
+            if vmin is not None:
+                vmin_str = str(vmin)
+                if cs["min"] is None or vmin_str < str(cs["min"]):
+                    cs["min"] = vmin_str
+            if vmax is not None:
+                vmax_str = str(vmax)
+                if cs["max"] is None or vmax_str > str(cs["max"]):
+                    cs["max"] = vmax_str
+
         total_rows += len(chunk)
+        chunks_processed += 1
         logger.info(f"  ... Chunk {i + 1} processado. Total: {total_rows} linhas.")
 
+    summary = {
+        "table": table_name,
+        "config": config_name,
+        "rows_total": int(total_rows),
+        "chunks_processed": int(chunks_processed),
+        "quality_gate_chunks": int(quality_gate_chunks),
+        "invalid_cnpj_rows_skipped": int(invalid_cnpj_rows),
+        "changed_totals": changed_totals,
+        "null_delta_totals": null_delta_totals,
+        "column_stats": column_stats,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    dir_path = _jsonl_dir("telemetry")
+    _write_json(dir_path / f"{config_name}_summary.json", summary)
+    if getattr(settings, "enable_metrics_prometheus", False):
+        metrics_lines = []
+        metrics_lines.append(f"cnpj_auto_repair_rows_total{{table=\"{table_name}\"}} {int(total_rows)}")
+        metrics_lines.append(f"cnpj_auto_repair_quality_gate_chunks_total{{table=\"{table_name}\"}} {int(quality_gate_chunks)}")
+        for c, n in changed_totals.items():
+            metrics_lines.append(f"cnpj_auto_repair_changed_total{{table=\"{table_name}\",column=\"{c}\"}} {int(n)}")
+        for c, d in null_delta_totals.items():
+            metrics_lines.append(f"cnpj_auto_repair_null_delta_total{{table=\"{table_name}\",column=\"{c}\"}} {int(d)}")
+        p = getattr(settings, "prometheus_metrics_path", None)
+        out_path = Path(p) if p else (dir_path / "metrics.prom")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "a", encoding="utf-8") as f:
+            f.write("\n".join(metrics_lines) + "\n")
+        if getattr(settings, "enable_prometheus_push", False) and getattr(settings, "prometheus_push_url", None):
+            job = getattr(settings, "prometheus_job", "cnpj_auto_repair")
+            inst = getattr(settings, "prometheus_instance", "local")
+            url = str(getattr(settings, "prometheus_push_url"))
+            push_url = url.rstrip("/") + f"/metrics/job/{job}/instance/{inst}"
+            try:
+                requests.post(push_url, data="\n".join(metrics_lines) + "\n", headers={"Content-Type": "text/plain"}, timeout=10)
+            except Exception:
+                pass
+    if getattr(settings, "enable_otlp_push", False) and getattr(settings, "otlp_endpoint", None):
+        try:
+            requests.post(str(getattr(settings, "otlp_endpoint")), json=summary, timeout=10)
+        except Exception:
+            pass
     logger.info(f"--- Tabela '{table_name}' finalizada! ---")
 
 
@@ -563,6 +715,12 @@ def execute_sql_file(conn, filename):
             old_autocommit = conn.autocommit
             try:
                 conn.autocommit = True
+                if filename == "constraints.sql":
+                    try:
+                        with conn.cursor() as cursor:
+                            cursor.execute("SET app.enable_backfill = %s", ('1' if getattr(settings, 'enable_constraints_backfill', True) else '0',))
+                    except Exception:
+                        pass
                 statements = [s.strip() for s in sql_content.split(";") if s.strip()]
                 for stmt in statements:
                     with conn.cursor() as cursor:
@@ -641,6 +799,7 @@ def create_partitioned_estabelecimentos(conn):
         cep CHAR(8),
         uf CHAR(2),
         municipio_codigo SMALLINT,
+        municipio_nome VARCHAR(150),
         ddd_1 VARCHAR(4),
         telefone_1 VARCHAR(9),
         ddd_2 VARCHAR(4),
@@ -649,7 +808,9 @@ def create_partitioned_estabelecimentos(conn):
         fax VARCHAR(9),
         correio_eletronico VARCHAR(255),
         situacao_especial VARCHAR(100),
-        data_situacao_especial DATE
+        data_situacao_especial DATE,
+        uf_source VARCHAR(20),
+        municipio_source VARCHAR(20)
     ) PARTITION BY LIST (uf);
     """
     ufs = [

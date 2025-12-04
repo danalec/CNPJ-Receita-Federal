@@ -5,41 +5,47 @@
 
 SET search_path TO rfb;
 
-INSERT INTO paises (codigo, nome)
-SELECT DISTINCT est.pais_codigo, 'NÃO INFORMADO NA ORIGEM (' || est.pais_codigo || ')'
-FROM estabelecimentos est
-LEFT JOIN paises p ON est.pais_codigo = p.codigo
-WHERE p.codigo IS NULL AND est.pais_codigo IS NOT NULL;
+DO $$
+BEGIN
+  IF current_setting('app.enable_backfill', true) = '1' THEN
+    INSERT INTO paises (codigo, nome)
+    SELECT DISTINCT est.pais_codigo, 'NÃO INFORMADO NA ORIGEM (' || est.pais_codigo || ')'
+    FROM estabelecimentos est
+    LEFT JOIN paises p ON est.pais_codigo = p.codigo
+    WHERE p.codigo IS NULL AND est.pais_codigo IS NOT NULL;
 
-INSERT INTO municipios (codigo, nome)
-SELECT DISTINCT est.municipio_codigo, 'NÃO INFORMADO NA ORIGEM (' || est.municipio_codigo || ')'
-FROM estabelecimentos est
-LEFT JOIN municipios m ON est.municipio_codigo = m.codigo
-WHERE m.codigo IS NULL AND est.municipio_codigo IS NOT NULL;
+    INSERT INTO municipios (codigo, nome)
+    SELECT DISTINCT est.municipio_codigo, 'NÃO INFORMADO NA ORIGEM (' || est.municipio_codigo || ')'
+    FROM estabelecimentos est
+    LEFT JOIN municipios m ON est.municipio_codigo = m.codigo
+    WHERE m.codigo IS NULL AND est.municipio_codigo IS NOT NULL;
 
-INSERT INTO qualificacoes_socios (codigo, nome)
-SELECT DISTINCT e.qualificacao_responsavel, 'NÃO INFORMADO NA ORIGEM (' || e.qualificacao_responsavel || ')'
-FROM empresas e
-LEFT JOIN qualificacoes_socios q ON e.qualificacao_responsavel = q.codigo
-WHERE q.codigo IS NULL AND e.qualificacao_responsavel IS NOT NULL;
+    INSERT INTO qualificacoes_socios (codigo, nome)
+    SELECT DISTINCT e.qualificacao_responsavel, 'NÃO INFORMADO NA ORIGEM (' || e.qualificacao_responsavel || ')'
+    FROM empresas e
+    LEFT JOIN qualificacoes_socios q ON e.qualificacao_responsavel = q.codigo
+    WHERE q.codigo IS NULL AND e.qualificacao_responsavel IS NOT NULL;
 
-INSERT INTO qualificacoes_socios (codigo, nome)
-SELECT DISTINCT s.qualificacao_socio_codigo, 'NÃO INFORMADO NA ORIGEM (' || s.qualificacao_socio_codigo || ')'
-FROM socios s
-LEFT JOIN qualificacoes_socios q ON s.qualificacao_socio_codigo = q.codigo
-WHERE q.codigo IS NULL AND s.qualificacao_socio_codigo IS NOT NULL;
+    INSERT INTO qualificacoes_socios (codigo, nome)
+    SELECT DISTINCT s.qualificacao_socio_codigo, 'NÃO INFORMADO NA ORIGEM (' || s.qualificacao_socio_codigo || ')'
+    FROM socios s
+    LEFT JOIN qualificacoes_socios q ON s.qualificacao_socio_codigo = q.codigo
+    WHERE q.codigo IS NULL AND s.qualificacao_socio_codigo IS NOT NULL;
 
-INSERT INTO naturezas_juridicas (codigo, nome)
-SELECT DISTINCT e.natureza_juridica_codigo, 'NÃO INFORMADO NA ORIGEM (' || e.natureza_juridica_codigo || ')'
-FROM empresas e
-LEFT JOIN naturezas_juridicas n ON e.natureza_juridica_codigo = n.codigo
-WHERE n.codigo IS NULL AND e.natureza_juridica_codigo IS NOT NULL;
+    INSERT INTO naturezas_juridicas (codigo, nome)
+    SELECT DISTINCT e.natureza_juridica_codigo, 'NÃO INFORMADO NA ORIGEM (' || e.natureza_juridica_codigo || ')'
+    FROM empresas e
+    LEFT JOIN naturezas_juridicas n ON e.natureza_juridica_codigo = n.codigo
+    WHERE n.codigo IS NULL AND e.natureza_juridica_codigo IS NOT NULL;
 
-INSERT INTO cnaes (codigo, nome)
-SELECT DISTINCT est.cnae_fiscal_principal_codigo, 'NÃO INFORMADO NA ORIGEM (' || est.cnae_fiscal_principal_codigo || ')'
-FROM estabelecimentos est
-LEFT JOIN cnaes c ON est.cnae_fiscal_principal_codigo = c.codigo
-WHERE c.codigo IS NULL AND est.cnae_fiscal_principal_codigo IS NOT NULL;
+    INSERT INTO cnaes (codigo, nome)
+    SELECT DISTINCT est.cnae_fiscal_principal_codigo, 'NÃO INFORMADO NA ORIGEM (' || est.cnae_fiscal_principal_codigo || ')'
+    FROM estabelecimentos est
+    LEFT JOIN cnaes c ON est.cnae_fiscal_principal_codigo = c.codigo
+    WHERE c.codigo IS NULL AND est.cnae_fiscal_principal_codigo IS NOT NULL;
+  END IF;
+END
+$$;
 
 ALTER TABLE paises ADD PRIMARY KEY (codigo);
 ALTER TABLE municipios ADD PRIMARY KEY (codigo);

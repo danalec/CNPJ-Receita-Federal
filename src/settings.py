@@ -83,12 +83,28 @@ class Settings(BaseSettings):
     quarantine_max_bytes: int = 10_000_000
     telemetry_rotate_daily: bool = True
     quarantine_rotate_daily: bool = True
+    enable_constraints_backfill: bool = True
+    enable_cep_enrichment: bool = False
+    cep_map_path: Optional[Path] = None
+    enable_quality_gates: bool = True
+    gate_max_changed_ratio: float = 0.3
+    gate_max_null_delta_ratio: float = 0.3
+    gate_log_level: Literal["INFO", "WARNING"] = "WARNING"
+    enable_metrics_prometheus: bool = False
+    prometheus_metrics_path: Optional[Path] = None
+    enable_prometheus_push: bool = False
+    prometheus_push_url: Optional[str] = None
+    prometheus_job: str = "cnpj_auto_repair"
+    prometheus_instance: str = "local"
+    enable_otlp_push: bool = False
+    otlp_endpoint: Optional[str] = None
+    cep_correct_uf_only_if_null: bool = True
+    municipio_name_map_path: Optional[Path] = None
 
     user_agent_rotation: Literal["random", "sequential"] = "random"
     user_agents: list[str] = []
 
     
-
     @computed_field
     def download_url(self) -> str:
         """Monta a URL completa baseada na data alvo."""
@@ -129,6 +145,11 @@ class Settings(BaseSettings):
         return base / "telemetry"
 
     @computed_field
+    def auto_repair_dir(self) -> Path:
+        base = cast(Path, self.log_dir)
+        return base / "auto_repair"
+
+    @computed_field
     def quarantine_dir(self) -> Path:
         base = cast(Path, self.log_dir)
         return base / "quarantine"
@@ -158,6 +179,7 @@ class Settings(BaseSettings):
         cast(Path, self.queries_dir).mkdir(parents=True, exist_ok=True)
         cast(Path, self.telemetry_dir).mkdir(parents=True, exist_ok=True)
         cast(Path, self.quarantine_dir).mkdir(parents=True, exist_ok=True)
+        cast(Path, self.auto_repair_dir).mkdir(parents=True, exist_ok=True)
 
 
 # Instancia e cria diretórios
