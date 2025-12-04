@@ -75,7 +75,9 @@ def _get_domain_set(conn, table, column):
                 tbl=sql.Identifier(table),
             )
         )
-        s = set(r[0] for r in cursor.fetchall() if r[0] is not None)
+        fetchall = getattr(cursor, "fetchall", None)
+        rows = fetchall() if callable(fetchall) else []
+        s = set(r[0] for r in rows if r is not None)
     DOMAIN_CACHE[key] = s
     return s
 
@@ -188,10 +190,12 @@ def sanitize_dates(df, date_columns):
 
 def clean_empresas_chunk(chunk_df):
     if "capital_social" in chunk_df.columns:
-        chunk_df["capital_social"] = pd.to_numeric(
-            chunk_df["capital_social"].astype(str).str.replace(",", ".", regex=False),
-            errors="coerce",
-        )
+        s = chunk_df["capital_social"].astype(str).str.strip()
+        s = s.replace({"": None, "None": None, "nan": None}, regex=False)
+        s = s.astype(str)
+        s = s.str.replace(".", "", regex=False)
+        s = s.str.replace(",", ".", regex=False)
+        chunk_df["capital_social"] = pd.to_numeric(s, errors="coerce")
     return chunk_df
 
 
@@ -742,6 +746,8 @@ def execute_sql_file(conn, filename):
                     statements.extend([s.strip() for s in remainder.split(";") if s.strip()])
                 else:
                     statements = [s.strip() for s in sql_content.split(";") if s.strip()]
+                with conn.cursor() as cursor:
+                    cursor.execute("SET search_path TO rfb;")
                 for stmt in statements:
                     with conn.cursor() as cursor:
                         cursor.execute(stmt)
@@ -750,7 +756,7 @@ def execute_sql_file(conn, filename):
                 conn.autocommit = old_autocommit
         else:
             with conn.cursor() as cursor:
-                cursor.execute(sql_content)
+                cursor.execute("SET search_path TO rfb;" + "\n" + sql_content)
             conn.commit()
             logger.info(f"Sucesso ao executar {filename}")
     except Exception as e:

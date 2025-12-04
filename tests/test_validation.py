@@ -1,5 +1,4 @@
 import pandas as pd
-from pathlib import Path
 
 from src.settings import settings
 from src.validation import validate
@@ -46,6 +45,17 @@ def test_validate_estabelecimentos_basic():
     assert out["cnae_fiscal_secundaria"].iloc[0].startswith("{")
     assert out["ddd_1"].iloc[0] == "02"
     assert out["telefone_1"].iloc[0] == "111222333"
+
+
+def test_validate_estabelecimentos_phone_branches():
+    settings.auto_repair_level = "basic"
+    df = pd.DataFrame({
+        "ddd_1": ["2","02","002"],
+        "telefone_1": ["123456789","111-222-333","(11) 222333"],
+    })
+    out, _, _ = validate("estabelecimentos", df.copy())
+    assert out["ddd_1"].tolist() == ["2","02","002"]
+    assert out["telefone_1"].tolist() == ["123456789","111222333","11222333"]
 
 
 def test_validate_estabelecimentos_aggressive():
