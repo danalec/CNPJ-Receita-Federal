@@ -190,6 +190,21 @@ class Settings(BaseSettings):
         env=("CSV_FILTER",),
     )
 
+    user_agent_rotation: Literal["random", "sequential"] = Field(
+        default="random",
+        description="Modo de rotação de User-Agent.",
+        env=("USER_AGENT_ROTATION",),
+    )
+    user_agents_raw: Optional[str] = Field(
+        default=None,
+        description="Lista de User-Agents separada por vírgula, ponto e vírgula ou barra vertical.",
+        env=("USER_AGENTS_RAW",),
+    )
+    user_agents: list[str] = Field(
+        default_factory=list,
+        description="Lista de User-Agents após parsing.",
+    )
+
     @computed_field
     def download_url(self) -> str:
         """Monta a URL completa baseada na data alvo."""
@@ -242,6 +257,16 @@ class Settings(BaseSettings):
                     object.__setattr__(self, "postgres_port", parsed.port)
                 if parsed.path and len(parsed.path) > 1:
                     object.__setattr__(self, "postgres_database", parsed.path.lstrip("/"))
+
+        if self.user_agents_raw and not self.user_agents:
+            raw = self.user_agents_raw
+            for sep in ["|", ";", ",", "\n"]:
+                if sep in raw:
+                    parts = [p.strip() for p in raw.split(sep) if p.strip()]
+                    object.__setattr__(self, "user_agents", parts)
+                    break
+            if not self.user_agents and raw.strip():
+                object.__setattr__(self, "user_agents", [raw.strip()])
 
     def create_dirs(self):
         """Garante que a estrutura de pastas exista."""

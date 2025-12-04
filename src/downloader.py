@@ -1,4 +1,6 @@
 import requests
+import random
+from typing import Optional
 import logging
 from pathlib import Path
 from bs4 import BeautifulSoup
@@ -13,18 +15,61 @@ from .settings import settings
 logger = logging.getLogger(__name__)
 
 
-def get_session():
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Edg/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/604.1",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0",
+]
+
+LANGS = [
+    "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7",
+    "pt-PT,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+]
+
+_UA_INDEX = 0
+
+def get_user_agents() -> list[str]:
+    return settings.user_agents if settings.user_agents else USER_AGENTS
+
+def choose_user_agent() -> str:
+    uas = get_user_agents()
+    if settings.user_agent_rotation == "sequential":
+        global _UA_INDEX
+        ua = uas[_UA_INDEX % len(uas)]
+        _UA_INDEX += 1
+        return ua
+    return random.choice(uas)
+
+def choose_accept_language() -> str:
+    return random.choice(LANGS)
+
+def build_headers(referrer: Optional[str] = None) -> dict:
+    headers = {
+        "User-Agent": choose_user_agent(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": choose_accept_language(),
+    }
+    if referrer:
+        headers["Referer"] = referrer
+    return headers
+
+
+def get_session(referrer: Optional[str] = None):
     """
     Cria uma sessão requests com estratégia de retentativa (Retry).
     Isso torna o download resiliente a falhas de rede momentâneas.
     """
     session = requests.Session()
-    session.headers.update(
-        {
-            "User-Agent": "cnpj-etl/0.1 (+https://github.com/folclore/cnpj-receita-federal)",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        }
-    )
+    session.headers.update(build_headers(referrer))
     retry = Retry(
         total=3,  # Tenta 3 vezes
         backoff_factor=3,  # Espera 1s, 2s, 4s... entre tentativas
@@ -42,7 +87,7 @@ def get_zip_links(base_url: str) -> list[str]:
     Acessa a URL da data (ex: .../2025-11/) e raspa todos os links .zip.
     """
     logger.info(f"Buscando lista de arquivos em: {base_url}")
-    session = get_session()
+    session = get_session(referrer=base_url)
 
     try:
         response = session.get(base_url, timeout=30)
@@ -79,7 +124,7 @@ def download_file(url: str, dest_dir: Path):
     dest_path = dest_dir / filename
     download_chunck_size = settings.download_chunk_size
 
-    session = get_session()
+    session = get_session(referrer=url)
 
     try:
         existing_size = dest_path.stat().st_size if dest_path.exists() else 0

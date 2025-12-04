@@ -56,6 +56,7 @@ Sem `make`, utilize `tasks.ps1` na raiz:
 
 Variáveis suportadas (aliases aceitos: `POSTGRES_*` e `PG*`). Opcional: `DATABASE_URL`.
 Suportados também: `LOG_LEVEL`, `LOG_BACKUP_COUNT`, `CSV_FILTER`, `FILE_ENCODING`, `CHUNK_SIZE`.
+User-Agent: `USER_AGENT_ROTATION` (`random`/`sequential`) e `USER_AGENTS_RAW` para lista customizada separada por `,`, `;` ou `|`.
 
 ### Estado do pipeline
 - O progresso é persistido em `data/state.json`. Este arquivo registra a `target_date`, o `stage` atual e o `status` de execução, permitindo retomada automática e `--force` para reprocessar todas as etapas.
@@ -111,6 +112,7 @@ Para conteúdo aprofundado (fluxo, exemplos por módulo, troubleshooting, diagra
 - [Diagrama ER](docs/diagrama_er.md)
 - [Boas práticas de índices](docs/boas-praticas-indices.md)
 - [Guia de Docker](docs/docker.md)
+- [Rotação de User-Agent](docs/user-agent.md)
  
 
 ## Troubleshooting
