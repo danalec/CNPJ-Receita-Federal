@@ -2,7 +2,7 @@ import pandas as pd
 import re
 import logging
 import unicodedata
-from typing import TypeVar, Generic
+from typing import TypeVar, Generic, ClassVar, Any
 from pathlib import Path
 from .settings import settings
 
@@ -14,6 +14,11 @@ class SchemaModel:
     @classmethod
     def validate(cls, df, lazy=True):
         return df
+    DIFF_COLUMNS: ClassVar[list[str]] = []
+
+    @classmethod
+    def clean(cls, df: pd.DataFrame, level: str, settings_obj, helpers) -> tuple[pd.DataFrame, dict[str, pd.Series], dict[str, Any]]:
+        return df, {}, {}
 
 
 class EmpresasSchema(SchemaModel):
@@ -24,6 +29,17 @@ class EmpresasSchema(SchemaModel):
         capital_social: PanderaSeries[float]
         porte_empresa: PanderaSeries[pd.Int64Dtype]
         ente_federativo_responsavel: PanderaSeries[str]
+        DIFF_COLUMNS: ClassVar[list[str]] = ["cnpj_basico","razao_social"]
+
+        @classmethod
+        def clean(cls, df: pd.DataFrame, level: str, settings_obj, helpers) -> tuple[pd.DataFrame, dict[str, pd.Series], dict[str, Any]]:
+                if "cnpj_basico" in df.columns:
+                        df["cnpj_basico"] = helpers["ensure_len"](df["cnpj_basico"], 8)
+                if "razao_social" in df.columns:
+                        df["razao_social"] = helpers["strip_empty_to_na"](df["razao_social"])
+                if "ente_federativo_responsavel" in df.columns:
+                        df["ente_federativo_responsavel"] = helpers["strip_empty_to_na"](df["ente_federativo_responsavel"])
+                return df, {}, {}
 
 
 class EstabelecimentosSchema(SchemaModel):
@@ -57,6 +73,176 @@ class EstabelecimentosSchema(SchemaModel):
         correio_eletronico: PanderaSeries[str]
         situacao_especial: PanderaSeries[str]
         data_situacao_especial: PanderaSeries[object]
+        DIFF_COLUMNS: ClassVar[list[str]] = [
+            "cnpj_basico","cnpj_ordem","cnpj_dv","uf","cep",
+            "cnae_fiscal_principal_codigo","cnae_fiscal_secundaria","correio_eletronico"
+        ]
+
+
+        @classmethod
+        def clean(cls, df: pd.DataFrame, level: str, settings_obj, helpers) -> tuple[pd.DataFrame, dict[str, pd.Series], dict[str, Any]]:
+                masks: dict[str, pd.Series] = {}
+                extras: dict[str, Any] = {}
+                cep_enrichment: dict[str, Any] = {}
+                if "cnpj_basico" in df.columns:
+                        df["cnpj_basico"] = helpers["ensure_len"](df["cnpj_basico"], 8)
+                if "cnpj_ordem" in df.columns:
+                        df["cnpj_ordem"] = helpers["ensure_len"](df["cnpj_ordem"], 4)
+                if "cnpj_dv" in df.columns:
+                        df["cnpj_dv"] = helpers["ensure_len"](df["cnpj_dv"], 2)
+                for c in [
+                        "nome_fantasia","tipo_logradouro","logradouro","complemento","bairro",
+                        "correio_eletronico","situacao_especial","nome_cidade_exterior","municipio_nome"
+                ]:
+                        if c in df.columns:
+                                df[c] = helpers["strip_empty_to_na"](df[c])
+                if "correio_eletronico" in df.columns:
+                        df["correio_eletronico"] = helpers["normalize_email"](df["correio_eletronico"])
+                if "cep" in df.columns:
+                        df["cep"] = helpers["ensure_len"](df["cep"], 8)
+                if "uf" in df.columns:
+                        df["uf"] = helpers["normalize_uf"](df["uf"])
+                if "cnae_fiscal_principal_codigo" in df.columns:
+                        df["cnae_fiscal_principal_codigo"] = helpers["normalize_cnae_code"](df["cnae_fiscal_principal_codigo"])
+                if "cnae_fiscal_secundaria" in df.columns:
+                        df["cnae_fiscal_secundaria"] = helpers["normalize_pg_array_digits"](df["cnae_fiscal_secundaria"].fillna(""))
+                for c in ["ddd_1","telefone_1","ddd_2","telefone_2","ddd_fax","fax","numero"]:
+                        if c in df.columns:
+                                d = helpers["digits_only"](df[c])
+                                df[c] = d.mask(df[c].astype(str).str.strip().eq(""))
+                invalid_ids = {}
+                invalid_examples = {}
+                if {"cnpj_basico","cnpj_ordem","cnpj_dv"}.issubset(df.columns):
+                        cb = helpers["digits_only"](df["cnpj_basico"]).fillna("")
+                        co = helpers["digits_only"](df["cnpj_ordem"]).fillna("")
+                        dv = helpers["digits_only"](df["cnpj_dv"]).fillna("")
+                        full = (cb + co + dv)
+                        mask_full = full.str.len().eq(14)
+                        valid_mask = mask_full & full.map(helpers["cnpj_valid"])
+                        invalid_mask = mask_full & ~valid_mask
+                        if invalid_mask.any():
+                                invalid_ids["estabelecimentos_cnpj"] = int(invalid_mask.sum())
+                                invalid_examples["estabelecimentos_cnpj"] = full.loc[invalid_mask].head(10).tolist()
+                                masks["invalid_cnpj"] = invalid_mask
+                if level == "aggressive":
+                        if "cnae_fiscal_secundaria" in df.columns:
+                                df["cnae_fiscal_secundaria"] = helpers["dedup_sort_pg_array"](df["cnae_fiscal_secundaria"]) 
+                        if "correio_eletronico" in df.columns:
+                                df["correio_eletronico"] = helpers["normalize_email_strict"](df["correio_eletronico"])
+                        for c in ["ddd_1","ddd_2","ddd_fax"]:
+                                if c in df.columns:
+                                        d = df[c].astype(str)
+                                        df[c] = d.where(d.str.len().isin([2,3]))
+                        for c in ["telefone_1","telefone_2","fax"]:
+                                if c in df.columns:
+                                        d = df[c].astype(str)
+                                        df[c] = d.where(d.str.len().between(8,11))
+                        def _e164(ddd: str, phone: str) -> str | None:
+                                if not ddd or not phone:
+                                        return None
+                                if not ddd.isdigit() or not phone.isdigit():
+                                        return None
+                                if len(ddd) not in (2,3):
+                                        return None
+                                if len(phone) not in (8,9,10,11):
+                                        return None
+                                return "+55" + ddd + phone
+                        e164_examples = {}
+                        pairs = [("ddd_1","telefone_1"),("ddd_2","telefone_2"),("ddd_fax","fax")]
+                        for dcol, pcol in pairs:
+                                if dcol in df.columns and pcol in df.columns:
+                                        dser = df[dcol].fillna("").astype(str)
+                                        pser = df[pcol].fillna("").astype(str)
+                                        ex = []
+                                        for i in range(min(len(df), 200)):
+                                                v = _e164(dser.iloc[i], pser.iloc[i])
+                                                if v:
+                                                        ex.append(v)
+                                                if len(ex) >= 10:
+                                                        break
+                                        if ex:
+                                                e164_examples[pcol] = ex
+                        if e164_examples:
+                                extras["e164_examples"] = e164_examples
+                        if getattr(settings_obj, "enable_cep_enrichment", False):
+                                m = helpers["get_cep_map"]()
+                                if m is not None and "cep" in df.columns:
+                                        cep_digits = helpers["ensure_len"](df["cep"], 8)
+                                        key_col = None
+                                        if {"cep","uf","municipio_codigo"}.issubset(set(m.columns)):
+                                                key_col = "cep"
+                                                keys = cep_digits
+                                        elif {"cep_prefix","uf","municipio_codigo"}.issubset(set(m.columns)):
+                                                key_col = "cep_prefix"
+                                                keys = cep_digits.fillna("").astype(str).str[:5]
+                                        if key_col is not None:
+                                                df_keys = pd.DataFrame({key_col: keys})
+                                                merged = df_keys.merge(m, on=key_col, how="left", suffixes=("","_map"))
+                                                if "municipio_codigo" in df.columns and "municipio_codigo" in merged.columns:
+                                                        mun = pd.to_numeric(df["municipio_codigo"], errors="coerce").astype("Int64")
+                                                        mun_map = pd.to_numeric(merged["municipio_codigo"], errors="coerce").astype("Int64")
+                                                        infer_mask = mun.isna() & mun_map.notna()
+                                                        if infer_mask.any():
+                                                                df.loc[infer_mask, "municipio_codigo"] = mun_map.loc[infer_mask]
+                                                                df.loc[infer_mask, "municipio_source"] = ("cep_map_" + ("exact" if key_col == "cep" else "prefix"))
+                                                                # update cep_enrichment metrics
+                                                                examples = pd.DataFrame({
+                                                                        key_col: df_keys[key_col].loc[infer_mask].astype(str),
+                                                                        "municipio_codigo": mun_map.loc[infer_mask].astype(str),
+                                                                }).head(10).to_dict(orient="records")
+                                                                cep_enrichment["municipio_inferred_count"] = int(infer_mask.sum())
+                                                                cep_enrichment["municipio_inferred_examples"] = examples
+                                                if "uf" in df.columns and "uf" in merged.columns:
+                                                        uf_map = merged["uf"].astype(str)
+                                                        uf_cur = df["uf"].astype(str)
+                                                        only_if_null = getattr(settings_obj, "cep_correct_uf_only_if_null", True)
+                                                        corr_mask = uf_map.notna() & (uf_cur.isna() if only_if_null else ((uf_cur.isna()) | (uf_map != uf_cur)))
+                                                        if corr_mask.any():
+                                                                df.loc[corr_mask, "uf"] = uf_map.loc[corr_mask]
+                                                                df.loc[corr_mask, "uf_source"] = ("cep_map_" + ("exact" if key_col == "cep" else "prefix"))
+                                                                # update cep_enrichment metrics
+                                                                examples = pd.DataFrame({
+                                                                        key_col: df_keys[key_col].loc[corr_mask].astype(str),
+                                                                        "uf_before": uf_cur.loc[corr_mask].astype(str),
+                                                                        "uf_map": uf_map.loc[corr_mask].astype(str),
+                                                                }).head(10).to_dict(orient="records")
+                                cep_enrichment["uf_corrected_count"] = int(corr_mask.sum())
+                                cep_enrichment["uf_corrected_examples"] = examples
+                mun_map = helpers["get_mun_name_map"]()
+                if mun_map is not None and "municipio_nome" in df.columns:
+                        cols = set(mun_map.columns)
+                        mm = mun_map.copy()
+                        mm["municipio_nome_norm"] = helpers["normalize_name_series"](mm["municipio_nome"])
+                        if "uf" in cols:
+                                mm["uf_norm"] = mm["uf"].astype(str).str.strip().str.upper()
+                        dn = pd.DataFrame({
+                                "municipio_nome_norm": helpers["normalize_name_series"](df["municipio_nome"]) 
+                        })
+                        if "uf" in df.columns and "uf_norm" in mm.columns:
+                                dn["uf_norm"] = df["uf"].astype(str).str.strip().str.upper()
+                                merged = dn.merge(mm, on=["municipio_nome_norm","uf_norm"], how="left")
+                        else:
+                                merged = dn.merge(mm, on=["municipio_nome_norm"], how="left")
+                        if "municipio_codigo" in df.columns and "municipio_codigo" in merged.columns:
+                                mun = pd.to_numeric(df["municipio_codigo"], errors="coerce").astype("Int64")
+                                mun_map2 = pd.to_numeric(merged["municipio_codigo"], errors="coerce").astype("Int64")
+                                infer2 = mun.isna() & mun_map2.notna()
+                                if infer2.any():
+                                        df.loc[infer2, "municipio_codigo"] = mun_map2.loc[infer2]
+                                        df.loc[infer2, "municipio_source"] = "mun_name_map"
+                                        # update cep_enrichment metrics
+                                        examples = pd.DataFrame({
+                                                "municipio_nome": df["municipio_nome"].loc[infer2].astype(str),
+                                                "municipio_codigo": mun_map2.loc[infer2].astype(str),
+                                        }).head(10).to_dict(orient="records")
+                                        cep_enrichment["municipio_inferred_by_name_count"] = int(infer2.sum())
+                                        cep_enrichment["municipio_inferred_by_name_examples"] = examples
+                if invalid_ids:
+                        extras["invalid_ids"] = invalid_ids
+                        extras["invalid_id_examples"] = invalid_examples
+                if cep_enrichment:
+                        extras["cep_enrichment"] = cep_enrichment
+                return df, masks, extras
 
 
 class SociosSchema(SchemaModel):
@@ -73,6 +259,30 @@ class SociosSchema(SchemaModel):
         faixa_etaria: PanderaSeries[pd.Int64Dtype]
 
 
+        @classmethod
+        def clean(cls, df: pd.DataFrame, level: str, settings_obj, helpers) -> tuple[pd.DataFrame, dict[str, pd.Series], dict[str, Any]]:
+                if "cnpj_basico" in df.columns:
+                        df["cnpj_basico"] = helpers["ensure_len"](df["cnpj_basico"], 8)
+                if "cnpj_cpf_socio" in df.columns:
+                        d = helpers["digits_only"](df["cnpj_cpf_socio"])
+                        mask_len = d.str.len().isin([11,14])
+                        def _ok(x: str) -> bool:
+                                if len(x) == 11:
+                                        return helpers["cpf_valid"](x)
+                                if len(x) == 14:
+                                        return helpers["cnpj_valid"](x)
+                                return False
+                        valid = d.where(mask_len).map(lambda x: _ok(x) if isinstance(x, str) else False)
+                        df["cnpj_cpf_socio"] = d.where(valid)
+                if "representante_legal_cpf" in df.columns:
+                        cpf = helpers["ensure_len"](df["representante_legal_cpf"], 11)
+                        df["representante_legal_cpf"] = cpf.where(cpf.map(lambda x: helpers["cpf_valid"](x) if isinstance(x, str) else False))
+                for c in ["nome_socio_ou_razao_social","nome_representante_legal"]:
+                        if c in df.columns:
+                                df[c] = helpers["strip_empty_to_na"](df[c])
+                return df, {}, {}
+
+
 class SimplesSchema(SchemaModel):
         cnpj_basico: PanderaSeries[str]
         opcao_pelo_simples: PanderaSeries[str]
@@ -81,6 +291,23 @@ class SimplesSchema(SchemaModel):
         opcao_pelo_mei: PanderaSeries[str]
         data_opcao_pelo_mei: PanderaSeries[object]
         data_exclusao_do_mei: PanderaSeries[object]
+        DIFF_COLUMNS: ClassVar[list[str]] = ["cnpj_basico"]
+
+
+        @classmethod
+        def clean(cls, df: pd.DataFrame, level: str, settings_obj, helpers) -> tuple[pd.DataFrame, dict[str, pd.Series], dict[str, Any]]:
+                if "cnpj_basico" in df.columns:
+                        df["cnpj_basico"] = helpers["ensure_len"](df["cnpj_basico"], 8)
+                return df, {}, {}
+
+        
+
+SCHEMA_MAP: dict[str, type[SchemaModel]] = {
+    "empresas": EmpresasSchema,
+    "estabelecimentos": EstabelecimentosSchema,
+    "socios": SociosSchema,
+    "simples": SimplesSchema,
+}
 
 
 def validate(config_name: str, df: pd.DataFrame):
@@ -91,17 +318,9 @@ def validate(config_name: str, df: pd.DataFrame):
     before_nulls = {c: int(df[c].isna().sum()) for c in df.columns}
     cols_for_diff = []
     if level == "aggressive":
-        if config_name == "estabelecimentos":
-            cols_for_diff = [
-                "cnpj_basico","cnpj_ordem","cnpj_dv","uf","cep",
-                "cnae_fiscal_principal_codigo","cnae_fiscal_secundaria","correio_eletronico"
-            ]
-        elif config_name == "socios":
-            cols_for_diff = ["cnpj_basico","cnpj_cpf_socio","representante_legal_cpf"]
-        elif config_name == "empresas":
-            cols_for_diff = ["cnpj_basico","razao_social"]
-        elif config_name == "simples":
-            cols_for_diff = ["cnpj_basico"]
+        schema = SCHEMA_MAP.get(config_name)
+        if schema is not None and hasattr(schema, "DIFF_COLUMNS"):
+            cols_for_diff = list(getattr(schema, "DIFF_COLUMNS"))
     snapshot = {c: df[c].astype(str).copy() for c in cols_for_diff if c in df.columns}
     masks: dict[str, pd.Series] = {}
 
@@ -266,191 +485,26 @@ def validate(config_name: str, df: pd.DataFrame):
         def deacc(x: str) -> str:
             return "".join(c for c in unicodedata.normalize("NFKD", x) if not unicodedata.combining(c))
         return t.map(deacc)
-
-    if config_name == "empresas":
-        if "cnpj_basico" in df.columns:
-            df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
-        if "razao_social" in df.columns:
-            df["razao_social"] = _strip_empty_to_na(df["razao_social"])
-        if "ente_federativo_responsavel" in df.columns:
-            df["ente_federativo_responsavel"] = _strip_empty_to_na(df["ente_federativo_responsavel"])
-
-    elif config_name == "estabelecimentos":
-        if "cnpj_basico" in df.columns:
-            df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
-        if "cnpj_ordem" in df.columns:
-            df["cnpj_ordem"] = _ensure_len(df["cnpj_ordem"], 4)
-        if "cnpj_dv" in df.columns:
-            df["cnpj_dv"] = _ensure_len(df["cnpj_dv"], 2)
-        for c in ["nome_fantasia","tipo_logradouro","logradouro","complemento","bairro","correio_eletronico","situacao_especial","nome_cidade_exterior","municipio_nome"]:
-            if c in df.columns:
-                df[c] = _strip_empty_to_na(df[c])
-        if "correio_eletronico" in df.columns:
-            df["correio_eletronico"] = _normalize_email(df["correio_eletronico"])
-        if "cep" in df.columns:
-            df["cep"] = _ensure_len(df["cep"], 8)
-        if "uf" in df.columns:
-            df["uf"] = _normalize_uf(df["uf"])
-        if "cnae_fiscal_principal_codigo" in df.columns:
-            df["cnae_fiscal_principal_codigo"] = _normalize_cnae_code(df["cnae_fiscal_principal_codigo"])
-        if "cnae_fiscal_secundaria" in df.columns:
-            df["cnae_fiscal_secundaria"] = _normalize_pg_array_digits(df["cnae_fiscal_secundaria"].fillna(""))
-        for c in ["ddd_1","telefone_1","ddd_2","telefone_2","ddd_fax","fax","numero"]:
-            if c in df.columns:
-                df[c] = _digits_only(df[c]).mask(df[c].astype(str).str.strip().eq(""))
-        invalid_ids = {}
-        invalid_examples = {}
-        if {"cnpj_basico","cnpj_ordem","cnpj_dv"}.issubset(df.columns):
-            cb = _digits_only(df["cnpj_basico"]).fillna("")
-            co = _digits_only(df["cnpj_ordem"]).fillna("")
-            dv = _digits_only(df["cnpj_dv"]).fillna("")
-            full = (cb + co + dv)
-            mask_full = full.str.len().eq(14)
-            valid_mask = mask_full & full.map(_cnpj_valid)
-            invalid_mask = mask_full & ~valid_mask
-            if invalid_mask.any():
-                invalid_ids["estabelecimentos_cnpj"] = int(invalid_mask.sum())
-                invalid_examples["estabelecimentos_cnpj"] = full.loc[invalid_mask].head(10).tolist()
-                masks["invalid_cnpj"] = invalid_mask
-        if level == "aggressive":
-            if "cnae_fiscal_secundaria" in df.columns:
-                df["cnae_fiscal_secundaria"] = _dedup_sort_pg_array(df["cnae_fiscal_secundaria"]) 
-            if "correio_eletronico" in df.columns:
-                df["correio_eletronico"] = _normalize_email_strict(df["correio_eletronico"])
-            for c in ["ddd_1","ddd_2","ddd_fax"]:
-                if c in df.columns:
-                    d = df[c].astype(str)
-                    df[c] = d.where(d.str.len().isin([2,3]))
-            for c in ["telefone_1","telefone_2","fax"]:
-                if c in df.columns:
-                    d = df[c].astype(str)
-                    df[c] = d.where(d.str.len().between(8,11))
-            def _e164(ddd: str, phone: str) -> str | None:
-                if not ddd or not phone:
-                    return None
-                if not ddd.isdigit() or not phone.isdigit():
-                    return None
-                if len(ddd) not in (2,3):
-                    return None
-                if len(phone) not in (8,9,10,11):
-                    return None
-                return "+55" + ddd + phone
-            e164_examples = {}
-            pairs = [("ddd_1","telefone_1"),("ddd_2","telefone_2"),("ddd_fax","fax")]
-            for dcol, pcol in pairs:
-                if dcol in df.columns and pcol in df.columns:
-                    dser = df[dcol].fillna("").astype(str)
-                    pser = df[pcol].fillna("").astype(str)
-                    ex = []
-                    for i in range(min(len(df), 200)):
-                        v = _e164(dser.iloc[i], pser.iloc[i])
-                        if v:
-                            ex.append(v)
-                        if len(ex) >= 10:
-                            break
-                    if ex:
-                        e164_examples[pcol] = ex
-            if getattr(settings, "enable_cep_enrichment", False):
-                m = _get_cep_map()
-                if m is not None and "cep" in df.columns:
-                    cep_digits = _ensure_len(df["cep"], 8)
-                    key_col = None
-                    if {"cep","uf","municipio_codigo"}.issubset(set(m.columns)):
-                        key_col = "cep"
-                        keys = cep_digits
-                    elif {"cep_prefix","uf","municipio_codigo"}.issubset(set(m.columns)):
-                        key_col = "cep_prefix"
-                        keys = cep_digits.fillna("").astype(str).str[:5]
-                    if key_col is not None:
-                        df_keys = pd.DataFrame({key_col: keys})
-                        merged = df_keys.merge(m, on=key_col, how="left", suffixes=("","_map"))
-                        if "municipio_codigo" in df.columns and "municipio_codigo" in merged.columns:
-                            mun = pd.to_numeric(df["municipio_codigo"], errors="coerce").astype("Int64")
-                            mun_map = pd.to_numeric(merged["municipio_codigo"], errors="coerce").astype("Int64")
-                            infer_mask = mun.isna() & mun_map.notna()
-                            if infer_mask.any():
-                                df.loc[infer_mask, "municipio_codigo"] = mun_map.loc[infer_mask]
-                                df.loc[infer_mask, "municipio_source"] = ("cep_map_" + ("exact" if key_col == "cep" else "prefix"))
-                                if "cep_enrichment" not in locals():
-                                    cep_enrichment = {}
-                                examples = pd.DataFrame({
-                                    key_col: df_keys[key_col].loc[infer_mask].astype(str),
-                                    "municipio_codigo": mun_map.loc[infer_mask].astype(str),
-                                }).head(10).to_dict(orient="records")
-                                cep_enrichment["municipio_inferred_count"] = int(infer_mask.sum())
-                                cep_enrichment["municipio_inferred_examples"] = examples
-                        if "uf" in df.columns and "uf" in merged.columns:
-                            uf_map = merged["uf"].astype(str)
-                            uf_cur = df["uf"].astype(str)
-                            corr_mask = uf_map.notna() & (uf_cur.isna() if getattr(settings, "cep_correct_uf_only_if_null", True) else ((uf_cur.isna()) | (uf_map != uf_cur))) 
-                            if corr_mask.any():
-                                df.loc[corr_mask, "uf"] = uf_map.loc[corr_mask]
-                                df.loc[corr_mask, "uf_source"] = ("cep_map_" + ("exact" if key_col == "cep" else "prefix"))
-                                if "cep_enrichment" not in locals():
-                                    cep_enrichment = {}
-                                examples = pd.DataFrame({
-                                    key_col: df_keys[key_col].loc[corr_mask].astype(str),
-                                    "uf_before": uf_cur.loc[corr_mask].astype(str),
-                                    "uf_map": uf_map.loc[corr_mask].astype(str),
-                                }).head(10).to_dict(orient="records")
-                                cep_enrichment["uf_corrected_count"] = int(corr_mask.sum())
-                                cep_enrichment["uf_corrected_examples"] = examples
-            # Municipio name mapping (optional)
-            mun_map = _get_mun_name_map()
-            if mun_map is not None and "municipio_nome" in df.columns:
-                cols = set(mun_map.columns)
-                mm = mun_map.copy()
-                mm["municipio_nome_norm"] = _normalize_name_series(mm["municipio_nome"])
-                if "uf" in cols:
-                    mm["uf_norm"] = mm["uf"].astype(str).str.strip().str.upper()
-                dn = pd.DataFrame({
-                    "municipio_nome_norm": _normalize_name_series(df["municipio_nome"])
-                })
-                if "uf" in df.columns and "uf_norm" in mm.columns:
-                    dn["uf_norm"] = df["uf"].astype(str).str.strip().str.upper()
-                    merged = dn.merge(mm, on=["municipio_nome_norm","uf_norm"], how="left")
-                else:
-                    merged = dn.merge(mm, on=["municipio_nome_norm"], how="left")
-                if "municipio_codigo" in df.columns and "municipio_codigo" in merged.columns:
-                    mun = pd.to_numeric(df["municipio_codigo"], errors="coerce").astype("Int64")
-                    mun_map2 = pd.to_numeric(merged["municipio_codigo"], errors="coerce").astype("Int64")
-                    infer2 = mun.isna() & mun_map2.notna()
-                    if infer2.any():
-                        df.loc[infer2, "municipio_codigo"] = mun_map2.loc[infer2]
-                        df.loc[infer2, "municipio_source"] = "mun_name_map"
-                        if "cep_enrichment" not in locals():
-                            cep_enrichment = {}
-                        examples = pd.DataFrame({
-                            "municipio_nome": df["municipio_nome"].loc[infer2].astype(str),
-                            "municipio_codigo": mun_map2.loc[infer2].astype(str),
-                        }).head(10).to_dict(orient="records")
-                        cep_enrichment["municipio_inferred_by_name_count"] = int(infer2.sum())
-                        cep_enrichment["municipio_inferred_by_name_examples"] = examples
-
-    elif config_name == "socios":
-        if "cnpj_basico" in df.columns:
-            df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
-        if "cnpj_cpf_socio" in df.columns:
-            d = _digits_only(df["cnpj_cpf_socio"])
-            mask_len = d.str.len().isin([11,14])
-            def _ok(x: str) -> bool:
-                if len(x) == 11:
-                    return _cpf_valid(x)
-                if len(x) == 14:
-                    return _cnpj_valid(x)
-                return False
-            valid = d.where(mask_len).map(lambda x: _ok(x) if isinstance(x, str) else False)
-            df["cnpj_cpf_socio"] = d.where(valid)
-        if "representante_legal_cpf" in df.columns:
-            cpf = _ensure_len(df["representante_legal_cpf"], 11)
-            df["representante_legal_cpf"] = cpf.where(cpf.map(lambda x: _cpf_valid(x) if isinstance(x, str) else False))
-        for c in ["nome_socio_ou_razao_social","nome_representante_legal"]:
-            if c in df.columns:
-                df[c] = _strip_empty_to_na(df[c])
-
-    elif config_name == "simples":
-        if "cnpj_basico" in df.columns:
-            df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
+    schema = SCHEMA_MAP.get(config_name)
+    extras: dict[str, Any] = {}
+    if schema is not None:
+        helpers = {
+            "cpf_valid": _cpf_valid,
+            "cnpj_valid": _cnpj_valid,
+            "digits_only": _digits_only,
+            "strip_empty_to_na": _strip_empty_to_na,
+            "ensure_len": _ensure_len,
+            "normalize_uf": _normalize_uf,
+            "normalize_email": _normalize_email,
+            "normalize_email_strict": _normalize_email_strict,
+            "normalize_cnae_code": _normalize_cnae_code,
+            "normalize_pg_array_digits": _normalize_pg_array_digits,
+            "dedup_sort_pg_array": _dedup_sort_pg_array,
+            "get_cep_map": _get_cep_map,
+            "get_mun_name_map": _get_mun_name_map,
+            "normalize_name_series": _normalize_name_series,
+        }
+        df, masks, extras = schema.clean(df, level, settings, helpers)
 
     after_nulls = {c: int(df[c].isna().sum()) for c in df.columns}
     deltas = {c: after_nulls[c] - before_nulls.get(c, 0) for c in df.columns}
@@ -490,12 +544,6 @@ def validate(config_name: str, df: pd.DataFrame):
         "sample_diffs": sample_diffs,
         "changed_counts": changed_counts,
     }
-    if config_name == "estabelecimentos":
-        if "invalid_ids" in locals() and invalid_ids:
-            telemetry["invalid_ids"] = invalid_ids
-            telemetry["invalid_id_examples"] = invalid_examples
-        if level == "aggressive" and "e164_examples" in locals() and e164_examples:
-            telemetry["e164_examples"] = e164_examples
-        if level == "aggressive" and "cep_enrichment" in locals() and cep_enrichment:
-            telemetry["cep_enrichment"] = cep_enrichment
+    if extras:
+        telemetry.update(extras)
     return df, telemetry, masks
