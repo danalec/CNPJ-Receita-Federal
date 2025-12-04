@@ -150,6 +150,34 @@ LOG_LEVEL=INFO
 - Unitários: execute `pytest -q`.
 - Integração (requer Postgres): defina `PG_INTEGRATION=1` e variáveis de banco no `.env`, depois rode `pytest -q -m integration`.
 
+## Resolução de problemas
+
+- Encoding incorreto
+  - Sintomas: `UnicodeDecodeError`, caracteres estranhos nos CSVs.
+  - Ação: ajuste `FILE_ENCODING` (`latin1`, `utf-8` ou `iso-8859-1`). Se houver BOM, mantenha `STRIP_BOM=true`.
+  - Verificações:
+    - `rg -nU "^\xEF\xBB\xBF" data/extracted_files/**/*.csv`
+    - `python -c "import pandas as pd; print(pd.read_csv('data/extracted_files/empresas/empresas.csv', delimiter=';', encoding='latin1', nrows=5).head())"`
+
+- Espaço em disco insuficiente
+  - Requisito: ~80 GB livres (arquivos compactados, extraídos e banco).
+  - Ação: limpe diretórios antigos ou rode `python -m src.check_update` que limpa automaticamente.
+  - Verificações (Windows PowerShell):
+    - `Get-PSDrive -PSProvider FileSystem | Select Name, @{Name='FreeGB';Expression={"{0:N2}" -f ($_.Free/1GB)}}`
+    - Limpeza manual: `Remove-Item -Recurse -Force data\compressed_files\* ; Remove-Item -Recurse -Force data\extracted_files\*`
+
+- Lacunas de domínio (FKs ausentes)
+  - Sintomas: registros sem correspondência em tabelas de domínio.
+  - Ação: insira/ajuste códigos faltantes e execute `constraints.sql`.
+  - Consultas úteis (SQL):
+    - `SELECT COUNT(*) FROM estabelecimentos e LEFT JOIN cnaes c ON c.codigo = e.cnae_fiscal_principal_codigo WHERE c.codigo IS NULL;`
+    - `SELECT COUNT(*) FROM estabelecimentos e LEFT JOIN paises p ON p.codigo = e.pais_codigo WHERE e.pais_codigo IS NOT NULL AND p.codigo IS NULL;`
+    - `SELECT COUNT(*) FROM socios s LEFT JOIN qualificacoes_socios q ON q.codigo = s.qualificacao_socio_codigo WHERE q.codigo IS NULL;`
+
+- Estado do pipeline
+  - Arquivo de estado: `data/state.json`.
+  - Verificações: `rg -n '"target_date"|"stage"|"status"' data/state.json`
+
 ## Diagrama do banco (ER)
 
 Também pode ser visualizado em um PDF direto no [Site da receita](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf)
