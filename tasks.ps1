@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory = $true, Position = 0)]
-  [ValidateSet("install","lint","check","test","pipeline","step","ci")]
+  [ValidateSet("install","lint","check","test","pipeline","etl","step","ci")]
   [string]$Task,
   [Parameter(Mandatory = $false, Position = 1)]
   [string]$STEP
@@ -24,6 +24,13 @@ switch ($Task) {
   }
   "pipeline" {
     & poetry run python main.py
+  }
+  "etl" {
+    & poetry run python main.py --step download
+    & poetry run python main.py --step extract
+    & poetry run python main.py --step consolidate
+    & poetry run python main.py --step load
+    & poetry run python main.py --step constraints
   }
   "step" {
     if (-not $STEP) { Write-Error "STEP is required"; exit 2 }
