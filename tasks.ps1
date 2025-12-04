@@ -8,6 +8,25 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Write-Section([string]$text, [string]$color = 'Cyan') {
+  Write-Host ("==== $text ====") -ForegroundColor $color
+}
+
+function Invoke-Step([string]$name, [ScriptBlock]$action) {
+  Write-Host ("» Iniciando $name") -ForegroundColor Yellow
+  $swStep = [System.Diagnostics.Stopwatch]::StartNew()
+  & $action
+  $exit = $LASTEXITCODE
+  $swStep.Stop()
+  if (-not $exit) { $exit = 0 }
+  if ($exit -ne 0) {
+    Write-Host ("✖ $name falhou (código $exit) em {0:mm\:ss\.fff}" -f $swStep.Elapsed) -ForegroundColor Red
+    exit $exit
+  } else {
+    Write-Host ("✔ $name concluído em {0:mm\:ss\.fff}" -f $swStep.Elapsed) -ForegroundColor Green
+  }
+}
+
 switch ($Task) {
   "install" {
     & poetry install --with dev
@@ -27,17 +46,19 @@ switch ($Task) {
   }
   "etl" {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    & poetry run python main.py --step download
-    & poetry run python main.py --step extract
-    & poetry run python main.py --step consolidate
-    & poetry run python main.py --step load
-    & poetry run python main.py --step constraints
+    Write-Section "ETL"
+    Invoke-Step "download" { poetry run python -m src --step download }
+    Invoke-Step "extract" { poetry run python -m src --step extract }
+    Invoke-Step "consolidate" { poetry run python -m src --step consolidate }
+    Invoke-Step "load" { poetry run python -m src --step load }
+    Invoke-Step "constraints" { poetry run python -m src --step constraints }
     $sw.Stop()
-    Write-Host ("ETL concluído em {0:hh\:mm\:ss\.fff}" -f $sw.Elapsed)
+    Write-Host ("==== ETL concluído em {0:hh\:mm\:ss\.fff} ====" -f $sw.Elapsed) -ForegroundColor Magenta
   }
   "step" {
     if (-not $STEP) { Write-Error "STEP is required"; exit 2 }
-    & poetry run python main.py --step $STEP
+    Write-Section ("Executando step: $STEP")
+    Invoke-Step $STEP { poetry run python -m src --step $STEP }
   }
   "ci" {
     try { py -3.10 -m venv .venv310 } catch {}
