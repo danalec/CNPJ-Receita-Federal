@@ -612,7 +612,7 @@ def create_partitioned_estabelecimentos(conn):
         pais_codigo SMALLINT,
         data_inicio_atividade DATE,
         cnae_fiscal_principal_codigo INTEGER,
-        cnae_fiscal_secundaria TEXT[],
+        cnae_fiscal_secundaria INT[],
         tipo_logradouro VARCHAR(50),
         logradouro VARCHAR(255),
         numero VARCHAR(20),

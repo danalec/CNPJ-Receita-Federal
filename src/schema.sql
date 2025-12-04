@@ -80,7 +80,7 @@ CREATE UNLOGGED TABLE rfb.estabelecimentos (
     pais_codigo SMALLINT,
     data_inicio_atividade DATE,
     cnae_fiscal_principal_codigo INTEGER, -- 7 dígitos
-    cnae_fiscal_secundaria TEXT[],        -- Array nativo do Postgres
+    cnae_fiscal_secundaria INT[],         -- Array nativo do Postgres
     tipo_logradouro VARCHAR(50),
     logradouro VARCHAR(255),
     numero VARCHAR(20),
