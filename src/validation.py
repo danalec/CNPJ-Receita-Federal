@@ -1,4 +1,6 @@
 import pandas as pd
+import re
+import logging
 from typing import TypeVar, Generic
 
 T = TypeVar("T")
@@ -79,4 +81,104 @@ class SimplesSchema(SchemaModel):
 
 
 def validate(config_name: str, df: pd.DataFrame) -> pd.DataFrame:
+    logger = logging.getLogger(__name__)
+
+    def _digits_only(s: pd.Series) -> pd.Series:
+        return s.astype(str).str.replace(r"\D+", "", regex=True)
+
+    def _strip_empty_to_na(s: pd.Series) -> pd.Series:
+        t = s.astype(str).str.strip()
+        return t.mask(t.eq(""))
+
+    def _ensure_len(s: pd.Series, length: int) -> pd.Series:
+        d = _digits_only(s)
+        return d.where(d.str.len().eq(length))
+
+    def _normalize_uf(s: pd.Series) -> pd.Series:
+        val = s.astype(str).str.strip().str.upper()
+        return val.where(val.isin({
+            'AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RO','RS','RR','SC','SE','SP','TO'
+        }))
+
+    def _normalize_email(s: pd.Series) -> pd.Series:
+        t = s.astype(str).str.strip().str.lower()
+        return t.where(t.str.contains(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", regex=True))
+
+    def _normalize_cnae_code(s: pd.Series) -> pd.Series:
+        d = _digits_only(s)
+        return pd.to_numeric(d.where(d.str.len().eq(7)), errors="coerce").astype("Int64")
+
+    def _normalize_pg_array_digits(s: pd.Series) -> pd.Series:
+        def fix(x: str | None) -> str | None:
+            if x is None:
+                return None
+            xs = str(x).strip()
+            if xs == "":
+                return None
+            # Accept either raw tokens or PostgreSQL array text
+            if xs.startswith("{") and xs.endswith("}"):
+                body = xs[1:-1]
+                tokens = [p.strip() for p in body.split(",")]
+            else:
+                tokens = [p.strip() for p in re.split(r"[;,]", xs) if p.strip()]
+            digits = [re.sub(r"\D+", "", t) for t in tokens]
+            clean = [d for d in digits if len(d) == 7]
+            return ("{" + ",".join(clean) + "}") if clean else None
+        return s.map(fix)
+
+    if config_name == "empresas":
+        if "cnpj_basico" in df.columns:
+            df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
+        if "razao_social" in df.columns:
+            df["razao_social"] = _strip_empty_to_na(df["razao_social"])
+        if "ente_federativo_responsavel" in df.columns:
+            df["ente_federativo_responsavel"] = _strip_empty_to_na(df["ente_federativo_responsavel"])
+
+    elif config_name == "estabelecimentos":
+        if "cnpj_basico" in df.columns:
+            df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
+        if "cnpj_ordem" in df.columns:
+            df["cnpj_ordem"] = _ensure_len(df["cnpj_ordem"], 4)
+        if "cnpj_dv" in df.columns:
+            df["cnpj_dv"] = _ensure_len(df["cnpj_dv"], 2)
+        for c in ["nome_fantasia","tipo_logradouro","logradouro","complemento","bairro","correio_eletronico","situacao_especial","nome_cidade_exterior"]:
+            if c in df.columns:
+                df[c] = _strip_empty_to_na(df[c])
+        if "correio_eletronico" in df.columns:
+            df["correio_eletronico"] = _normalize_email(df["correio_eletronico"])
+        if "cep" in df.columns:
+            df["cep"] = _ensure_len(df["cep"], 8)
+        if "uf" in df.columns:
+            df["uf"] = _normalize_uf(df["uf"])
+        if "cnae_fiscal_principal_codigo" in df.columns:
+            df["cnae_fiscal_principal_codigo"] = _normalize_cnae_code(df["cnae_fiscal_principal_codigo"])
+        if "cnae_fiscal_secundaria" in df.columns:
+            df["cnae_fiscal_secundaria"] = _normalize_pg_array_digits(df["cnae_fiscal_secundaria"].fillna(""))
+        for c in ["ddd_1","telefone_1","ddd_2","telefone_2","ddd_fax","fax","numero"]:
+            if c in df.columns:
+                df[c] = _digits_only(df[c]).mask(df[c].astype(str).str.strip().eq(""))
+
+    elif config_name == "socios":
+        if "cnpj_basico" in df.columns:
+            df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
+        if "cnpj_cpf_socio" in df.columns:
+            d = _digits_only(df["cnpj_cpf_socio"])
+            df["cnpj_cpf_socio"] = d.where(d.str.len().isin([11,14]))
+        if "representante_legal_cpf" in df.columns:
+            df["representante_legal_cpf"] = _ensure_len(df["representante_legal_cpf"], 11)
+        for c in ["nome_socio_ou_razao_social","nome_representante_legal"]:
+            if c in df.columns:
+                df[c] = _strip_empty_to_na(df[c])
+
+    elif config_name == "simples":
+        if "cnpj_basico" in df.columns:
+            df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
+
+    # Metrics
+    repaired = {}
+    for col in df.columns:
+        if df[col].isna().any():
+            repaired[col] = int(df[col].isna().sum())
+    if repaired:
+        logger.info(f"Auto-repair: nullified/cleaned values per column: {repaired}")
     return df
