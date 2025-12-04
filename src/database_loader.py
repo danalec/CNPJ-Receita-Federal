@@ -8,7 +8,7 @@ import psycopg2
 import requests
 from psycopg2 import sql
 from pathlib import Path
-from typing import Dict, Tuple, Set, Union, cast, Any
+from typing import Dict, Tuple, Set, Union, cast, Any, TypedDict, Callable, Optional
 from .settings import settings
 from .validation import validate as schema_validate
 
@@ -230,7 +230,14 @@ def clean_simples_chunk(chunk_df):
     )
 
 
-ETL_CONFIG = {
+class ETLTableConfig(TypedDict, total=False):
+    table_name: str
+    column_names: list[str]
+    dtype_map: Dict[str, Any]
+    custom_clean_func: Callable[[pd.DataFrame], pd.DataFrame]
+
+
+ETL_CONFIG: Dict[str, ETLTableConfig] = {
     "paises": {"table_name": "paises", "column_names": ["codigo", "nome"]},
     "municipios": {"table_name": "municipios", "column_names": ["codigo", "nome"]},
     "qualificacoes": {
@@ -426,13 +433,13 @@ def _critical_fields(config_name: str):
 
 def process_and_load_file(conn: Any, config_name: str) -> None:
     try:
-        etl_config = ETL_CONFIG[config_name]
+        etl_config: ETLTableConfig = ETL_CONFIG[config_name]
     except KeyError:
         logger.error(f"Configuração para '{config_name}' não encontrada.")
         return
 
     table_name = etl_config["table_name"]
-    file_path = settings.extracted_dir / config_name / f"{config_name}.csv"
+    file_path = cast(Path, settings.extracted_dir) / config_name / f"{config_name}.csv"
 
     if not file_path.exists():
         logger.warning(f"Arquivo '{file_path}' não encontrado. Pulando.")
@@ -458,11 +465,17 @@ def process_and_load_file(conn: Any, config_name: str) -> None:
     quality_gate_chunks = 0
     invalid_cnpj_rows = 0
     chunks_processed = 0
-    column_stats: Dict[str, Dict[str, Union[int, str]]] = {}
+    class ColumnStats(TypedDict):
+        nulls: int
+        min: Optional[str]
+        max: Optional[str]
+
+    column_stats: Dict[str, ColumnStats] = {}
     for i, chunk in enumerate(reader):
         chunk_start = datetime.now(timezone.utc)
-        if "custom_clean_func" in etl_config:
-            chunk = etl_config["custom_clean_func"](chunk)
+        clean = etl_config.get("custom_clean_func")
+        if clean is not None:
+            chunk = clean(chunk)
         chunk, telemetry, masks = schema_validate(config_name, chunk)
         rows_count = int(len(chunk))
         telemetry_record = {
