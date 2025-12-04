@@ -1,68 +1,85 @@
 # CNPJ Dados Abertos - Pipeline de `ETL` para PostgreSQL
 
-Este projeto é uma ferramenta de `ETL` (Extract, Transform, Load) de alto desempenho projetada para automatizar o processo de baixar, tratar e carregar os dados públicos de CNPJ.
+Ferramenta de `ETL` (Extract, Transform, Load) de alto desempenho para baixar, tratar e carregar os dados públicos de CNPJ
+[(disponibilizados pela Receita Federal do Brasil)](https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/).
 
-[(disponibilizados pela Receita Federal do Brasil)](https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/)
-
-O foco principal é **performance**, utilizando técnicas como `COPY FROM STDIN`, tabelas `UNLOGGED` e tratamento de dados em _chunks_ via Pandas.
-
-As vezes há **Problemas de integridade**, como é o caso da versão `2025-11`. Que faltou o código de país `150`. Ou caso tenha algum problema de faltar chaves estrangeiras como um sócio que não consta. Não há problemas os dados já estão inseridos. Caso aconteça, basta corrigir o problema no banco de dados e executar `constraints.sql`. Para definir as constraints e ter um banco de dados integro.
-
-O script é **totalmente modular**, caso falhe em alguma etapa basta corrigir o problema e executar o módulo de onde parou.
+- Foco em **performance** com `COPY FROM STDIN`, tabelas `UNLOGGED` e processamento em _chunks_ via Pandas.
+- Pipeline **modular**: se alguma etapa falhar, corrija e retome diretamente daquele ponto.
+- Nota de integridade: eventualmente a Receita publica versões com lacunas (ex.: `2025-11` sem o código de país `150`). Se houver FKs ausentes, corrija no banco e execute `constraints.sql` para aplicar/reaplicar as restrições.
 
 ```bash
-python -m src.modulo
+python -m src.<modulo>
 ```
 
-# 🚀 Fluxo de dados
+## Como usar (rápido)
 
-## 1. Verificação Automática
+1. Instale as dependências e configure o `.env`.
+2. Execute `python -m src.check_update` para verificar novas versões.
+3. Rode `main.py` para orquestrar automaticamente todo o pipeline, ou execute módulos individualmente:
+   - `python -m src.downloader`
+   - `python -m src.extract_files`
+   - `python -m src.consolidate_csv`
+   - `python -m src.database_loader`
 
-Checa o site da Receita Federal para identificar se há uma nova versão dos dados disponível comparada à versão local. A data de processamento da última versão disponível fica em `data/last_version_processed.txt`
+## Exemplos por etapa
 
-Você pode adicionar o `main.py` ao seu `crontab ` ele checa se há atualizações, se tiver ele inicia o pipeline de processamento.
+- Verificar nova versão e preparar diretórios
+  - `python -m src.check_update`
 
-**Modulo responsável: `check_update.py`**
+- Download multithread dos ZIPs
+  - `python -c "from src.downloader import run_download; run_download()"`
 
-## 2. Download dos dados
+- Descompactação por grupos (empresas, estabelecimentos, etc.)
+  - `python -m src.extract_files`
 
-**Download dos arquivos** em multi-thread, máximo de 4 para evitar abusos de conexões simultâneas.
+- Consolidação de CSVs (um arquivo por categoria)
+  - `python -c "from src.consolidate_csv import run_consolidation; run_consolidation()"`
 
-**Módulo responsável: `downloader.py`**
+- Carga no PostgreSQL (COPY + limpeza por chunks)
+  - `python -c "from src.database_loader import run_loader; run_loader()"`
+
+- Aplicar constraints e índices (demorado)
+  - `python -c "from src.database_loader import run_constraints; run_constraints()"`
+
+# Fluxo de dados
+
+## 1. Verificação automática
+
+- Compara a versão online com a última processada em `data/last_version_processed.txt`.
+- Pode ser agendada (cron ou task scheduler) apontando para `main.py`.
+- Módulo: `check_update.py`.
+
+## 2. Download
+
+- Multi-thread (até 4 conexões simultâneas) com controle opcional de taxa.
+- Módulo: `downloader.py`.
 
 ## 3. Descompactação
 
-Descompacta arquivos baixados que por padrão são dívidos em vários arquivos `.zip`. Extrai agrupando o resultado em uma única pasta, normalmente os dados vem com um nome prefixado e as versões, `empresas01.zip`, `empresas02.zip` etc...
+- Extrai os `.zip` publicados em partes (ex.: `empresas01.zip`, `empresas02.zip`), consolidando a saída em uma pasta única.
+- Módulo: `extract_files.py`.
 
-**Módulo responsável: `extract_files.py`**
+## 4. Consolidação de CSVs
 
-## 4. Consolidação dos arquivos `CSVs`
+- Agrupa os CSVs descompactados em **um arquivo por categoria**, simplificando a carga.
+- Módulo: `consolidate_csv.py`.
 
-Agrupo os `CSVs` descompactados em único arquivo, único por categoria, removendo a necessidade de lidar com múltiplos arquivos durante a carga.
+## 5. Carga no banco
 
-**Módulo responsável: `consolidate_csv.py`**
+- Inserção em massa via `psycopg` com `COPY FROM STDIN`.
+- Tabelas `UNLOGGED` para acelerar a escrita inicial.
+- Limpeza de dados: conversões de data, arrays para CNAEs, decimais, etc.
+- Aplicação de PKs, FKs e índices **após** a carga.
+- Módulo: `database_loader.py`.
 
-## 5. Carga para o Banco de dados
+## Configuração e instalação
 
-Utiliza o comando `COPY` do PostgreSQL (via driver `psycopg`) para inserção em massa.
+### Pré-requisitos
 
-Cria tabelas como `UNLOGGED` para acelerar a escrita inicial.
-Realiza a limpeza de dados (conversão de datas, formatação de arrays para `CNAEs`, sanitização de decimais etc...)
+- PostgreSQL instalado e em execução.
+- Espaço em disco recomendado: **80 GB livres** (compactados + extraídos + banco).
 
-Aplicação de Chaves Primárias, Estrangeiras e Índices **após** a carga para maximizar a velocidade.
-
-Schema Otimizado Separação clara entre SQL de definição (`DDL`) e código Python.
-
-**Módulo responsável: `database_loader.py`**
-
-## ⚙️ Configuração e Instalação
-
-### 1. Pré-requisitos
-
-- PostgreSQL instalado e rodando.
-- **Espaço em disco:** Recomenda-se pelo menos **80GB livres** (Arquivos compactados + Extraídos + Banco de Dados).
-
-### 2. Instalação
+### Instalação
 
 ```bash
 # Clone o repositório
@@ -74,7 +91,7 @@ poetry install
 poetry shell
 ```
 
-### 3. Configuração
+### Configuração (.env)
 
 Crie um arquivo `.env` na raiz do projeto, existe um exemplo `.env.example` que você também pode renomear. Em `settings.py` há mais configurações opcionais.
 
@@ -97,7 +114,7 @@ CHUNK_SIZE=200_000
 LOG_LEVEL=INFO
 ```
 
-## � Performance e Robustez
+## Performance e robustez
 
 - Tabelas `UNLOGGED` aceleram a escrita inicial; restrições e índices são aplicados depois.
 - `COPY FROM STDIN` minimiza overhead de operações de inserção individuais.
@@ -105,12 +122,12 @@ LOG_LEVEL=INFO
 - `VERIFY_ZIP_INTEGRITY=true` habilita verificação de integridade de ZIPs.
 - `RATE_LIMIT_PER_SEC` (>0) ativa limitação de taxa de download.
 
-## ✅ Testes
+## Testes
 
 - Unitários: execute `pytest -q`.
 - Integração (requer Postgres): defina `PG_INTEGRATION=1` e variáveis de banco no `.env`, depois rode `pytest -q -m integration`.
 
-## �📊 Diagrama do Banco de Dados (ER)
+## Diagrama do banco (ER)
 
 Também pode ser visualizado em um PDF direto no [Site da receita](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf)
 Há uma versão em markdown em `docs`.
@@ -213,28 +230,29 @@ erDiagram
     SOCIOS }|--|| QUALIFICACOES_SOCIOS : "qualif. sócio"
 ```
 
-### Explicação Visual das Ligações
+### Explicação visual das ligações
 
 1. **EMPRESAS (Central)**: É a tabela pai. Ela conecta com:
 
-   - **ESTABELECIMENTOS**: Ligação forte (PK composta). Uma empresa tem várias filiais.
+   - **ESTABELECIMENTOS**: Ligação forte (PK composta). Uma empresa pode ter várias filiais.
 
-   - **SOCIOS**: Uma empresa tem vários sócios.
+   - **SÓCIOS**: Uma empresa tem vários sócios.
 
    - **SIMPLES**: Uma empresa pode ou não ter registro no Simples (0 ou 1).
 
 2. **ESTABELECIMENTOS**:
 
-   - Conecta com **CNAES** (Atividade econômica).
+   - Conecta com **CNAES** (atividade econômica).
 
-   - Conecta com **MUNICIPIOS** e **PAISES** (Geografia).
+   - Conecta com **MUNICÍPIOS** e **PAÍSES** (geografia).
 
-   - Nota: cnae_fiscal_secundaria não tem linha no diagrama ligando a CNAES porque implementamos como um **Array** de texto para performance, e não como uma tabela associativa (N:N), embora logicamente sejam códigos CNAE.
+   - Nota: `cnae_fiscal_secundaria` é um **array** de texto para performance (em vez de tabela associativa N:N), embora represente códigos CNAE.
 
 3. **SOCIOS**:
 
-   - Conecta com **QUALIFICACOES** (Para saber se é diretor, presidente, etc).
+   - Conecta com **QUALIFICAÇÕES** (diretor, presidente, etc.).
 
-## 🤝 Contribuição
+## Contribuição
 
-Sinta-se à vontade para abrir Issues relatando inconsistências nos dados da Receita ou enviar `PRs` com melhorias de performance.
+- Abra issues para relatar inconsistências nos dados ou propor melhorias.
+- Envie PRs com otimizações de performance, confiabilidade e manutenção.
