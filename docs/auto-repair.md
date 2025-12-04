@@ -67,6 +67,7 @@ Este documento descreve as configurações e o comportamento do mecanismo de AUT
 - `GATE_MAX_CHANGED_RATIO`: razão máxima de valores alterados por coluna
 - `GATE_MAX_NULL_DELTA_RATIO`: razão máxima de variação de nulos por coluna
 - `GATE_LOG_LEVEL`: nível de log (`INFO` ou `WARNING`) quando o gate dispara
+- `GATE_MIN_ROWS`: mínimo de linhas no chunk para aplicar gates
 - Ao disparar, o chunk é pulado; um registro `quality_gate` é escrito em telemetria e quarentena.
 
 ## Sumário e Métricas

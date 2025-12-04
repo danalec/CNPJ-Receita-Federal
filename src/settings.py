@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     gate_max_changed_ratio: float = 0.3
     gate_max_null_delta_ratio: float = 0.3
     gate_log_level: Literal["INFO", "WARNING"] = "WARNING"
+    gate_min_rows: int = 20
     enable_metrics_prometheus: bool = False
     prometheus_metrics_path: Optional[Path] = None
     enable_prometheus_push: bool = False
@@ -98,6 +99,7 @@ class Settings(BaseSettings):
     prometheus_instance: str = "local"
     enable_otlp_push: bool = False
     otlp_endpoint: Optional[str] = None
+    skip_invalid_estabelecimentos_cnpj: bool = False
     cep_correct_uf_only_if_null: bool = True
     municipio_name_map_path: Optional[Path] = None
 

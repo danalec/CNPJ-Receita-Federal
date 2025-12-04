@@ -8,7 +8,7 @@ import psycopg2
 import requests
 from psycopg2 import sql
 from pathlib import Path
-from typing import Dict, Tuple, Set, Union
+from typing import Dict, Tuple, Set, Union, cast
 from .settings import settings
 from .validation import validate as schema_validate
 
@@ -284,8 +284,7 @@ ETL_CONFIG = {
                 "bairro",
                 "cep",
                 "uf",
-            "municipio_codigo",
-            "municipio_nome",
+                "municipio_codigo",
                 "ddd_1",
                 "telefone_1",
                 "ddd_2",
@@ -295,6 +294,7 @@ ETL_CONFIG = {
                 "correio_eletronico",
                 "situacao_especial",
                 "data_situacao_especial",
+                "municipio_nome",
                 "uf_source",
                 "municipio_source",
             ],
@@ -377,7 +377,7 @@ ETL_CONFIG = {
 
 
 def _jsonl_dir(kind: str) -> Path:
-    base = settings.auto_repair_dir if kind == "telemetry" else settings.quarantine_dir
+    base = cast(Path, settings.auto_repair_dir) if kind == "telemetry" else cast(Path, settings.quarantine_dir)
     rotate = settings.telemetry_rotate_daily if kind == "telemetry" else settings.quarantine_rotate_daily
     if rotate:
         d = datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -474,7 +474,7 @@ def process_and_load_file(conn, config_name):
             "duration_ms": int((datetime.now(timezone.utc) - chunk_start).total_seconds() * 1000),
             **telemetry,
         }
-        if getattr(settings, "enable_quality_gates", True) and rows_count > 0:
+        if getattr(settings, "enable_quality_gates", True) and rows_count >= getattr(settings, "gate_min_rows", 20):
             triggers = {}
             changed = telemetry.get("changed_counts", {}) or {}
             deltas = telemetry.get("null_deltas", {}) or {}
@@ -571,14 +571,15 @@ def process_and_load_file(conn, config_name):
                     )
             except Exception:
                 pass
-            skip_count = int(masks["invalid_cnpj"].sum())
-            if skip_count:
-                chunk = chunk.loc[~masks["invalid_cnpj"]].copy()
-                logger.info(f"Chunk {i + 1}: skipped {skip_count} estabelecimentos rows due to invalid CNPJ.")
-                invalid_cnpj_rows += skip_count
-                if len(chunk) == 0:
-                    logger.info(f"Chunk {i + 1}: no rows left after skip; continuing.")
-                    continue
+            if getattr(settings, "skip_invalid_estabelecimentos_cnpj", False):
+                skip_count = int(masks["invalid_cnpj"].sum())
+                if skip_count:
+                    chunk = chunk.loc[~masks["invalid_cnpj"]].copy()
+                    logger.info(f"Chunk {i + 1}: skipped {skip_count} estabelecimentos rows due to invalid CNPJ.")
+                    invalid_cnpj_rows += skip_count
+                    if len(chunk) == 0:
+                        logger.info(f"Chunk {i + 1}: no rows left after skip; continuing.")
+                        continue
         try:
             fk_info = validate_chunk(config_name, chunk, conn)
         except ValueError as e:
@@ -715,13 +716,19 @@ def execute_sql_file(conn, filename):
             old_autocommit = conn.autocommit
             try:
                 conn.autocommit = True
+                statements = []
                 if filename == "constraints.sql":
-                    try:
-                        with conn.cursor() as cursor:
-                            cursor.execute("SET app.enable_backfill = %s", ('1' if getattr(settings, 'enable_constraints_backfill', True) else '0',))
-                    except Exception:
-                        pass
-                statements = [s.strip() for s in sql_content.split(";") if s.strip()]
+                    with conn.cursor() as cursor:
+                        cursor.execute("SET app.enable_backfill = %s", ('1' if getattr(settings, 'enable_constraints_backfill', True) else '0',))
+                    import re
+                    pattern = re.compile(r"DO\s+\$\$[\s\S]*?\$\$;", re.IGNORECASE)
+                    blocks = [m.group(0) for m in pattern.finditer(sql_content)]
+                    for g in blocks:
+                        statements.append(g)
+                    remainder = pattern.sub("", sql_content)
+                    statements.extend([s.strip() for s in remainder.split(";") if s.strip()])
+                else:
+                    statements = [s.strip() for s in sql_content.split(";") if s.strip()]
                 for stmt in statements:
                     with conn.cursor() as cursor:
                         cursor.execute(stmt)
@@ -799,7 +806,6 @@ def create_partitioned_estabelecimentos(conn):
         cep CHAR(8),
         uf CHAR(2),
         municipio_codigo SMALLINT,
-        municipio_nome VARCHAR(150),
         ddd_1 VARCHAR(4),
         telefone_1 VARCHAR(9),
         ddd_2 VARCHAR(4),
@@ -809,6 +815,7 @@ def create_partitioned_estabelecimentos(conn):
         correio_eletronico VARCHAR(255),
         situacao_especial VARCHAR(100),
         data_situacao_especial DATE,
+        municipio_nome VARCHAR(150),
         uf_source VARCHAR(20),
         municipio_source VARCHAR(20)
     ) PARTITION BY LIST (uf);

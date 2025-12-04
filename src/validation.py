@@ -153,7 +153,7 @@ def validate(config_name: str, df: pd.DataFrame):
         return t.where(t.str.contains(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", regex=True))
 
     def _normalize_email_strict(s: pd.Series) -> pd.Series:
-        def norm(x: str) -> str | None:
+        def norm(x: str | None) -> str | None:
             if x is None:
                 return None
             t = str(x).strip()
