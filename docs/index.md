@@ -36,3 +36,4 @@
 ## Ferramentas de Desenvolvimento
 - Makefile (Linux/macOS): `make lint`, `make check`, `make test`, `make pipeline`, `make step STEP=load`
 - PowerShell (Windows): `./tasks.ps1 lint`, `./tasks.ps1 check`, `./tasks.ps1 test`, `./tasks.ps1 pipeline`, `./tasks.ps1 step load`
+- Guia de Docker: docker.md

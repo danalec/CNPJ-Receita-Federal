@@ -105,6 +105,7 @@ Para conteúdo aprofundado (fluxo, exemplos por módulo, troubleshooting, diagra
 - [Descrição dos dados](docs/descricao-dados.md)
 - [Diagrama ER](docs/diagrama_er.md)
 - [Boas práticas de índices](docs/boas-praticas-indices.md)
+- [Guia de Docker](docs/docker.md)
  
 
 ## Troubleshooting
