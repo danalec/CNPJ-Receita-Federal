@@ -8,7 +8,7 @@ import psycopg2
 import requests
 from psycopg2 import sql
 from pathlib import Path
-from typing import Dict, Tuple, Set, Union, cast
+from typing import Dict, Tuple, Set, Union, cast, Any
 from .settings import settings
 from .validation import validate as schema_validate
 
@@ -424,7 +424,7 @@ def _critical_fields(config_name: str):
     return []
 
 
-def process_and_load_file(conn, config_name):
+def process_and_load_file(conn: Any, config_name: str) -> None:
     try:
         etl_config = ETL_CONFIG[config_name]
     except KeyError:

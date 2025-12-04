@@ -30,6 +30,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-    command: ["python","main.py","full"]
+    command: ["python","main.py"]
 volumes:
   pgdata:

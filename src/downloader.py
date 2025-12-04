@@ -218,7 +218,7 @@ def run_download():
 
     if not zip_links:
         logger.error("Nenhum arquivo encontrado para baixar.")
-        raise
+        raise RuntimeError("Nenhum arquivo encontrado para baixar.")
 
     # 4. Inicia o ThreadPool para baixar em paralelo
     logger.info(

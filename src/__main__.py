@@ -67,15 +67,9 @@ def main():
         choices=[s.value for s in PipelineStep],
         help="Executa apenas a etapa especificada do pipeline",
     )
-    parser.add_argument(
-        "--no-csv-filter",
-        action="store_true",
-        help="Desabilita filtros de CSV (linhas malformadas e vazias)",
-    )
     args = parser.parse_args()
 
-    if args.no_csv_filter:
-        pass
+    
 
     if args.step:
         step_value = args.step

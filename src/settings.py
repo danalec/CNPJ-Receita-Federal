@@ -1,4 +1,6 @@
 import logging
+import sys
+import io
 from pathlib import Path
 from typing import Literal, Optional, cast
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -193,14 +195,24 @@ def setup_logging():
     """Configura o logger raiz."""
     log_file = cast(Path, settings.log_dir) / "cnpj.log"
     level = getattr(logging, settings.log_level)
+    # Garante UTF-8 no console mesmo em ambientes Windows com CP1252
+    console_stream = sys.stdout
+    try:
+        if hasattr(console_stream, "reconfigure"):
+            console_stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        try:
+            console_stream = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
     logging.basicConfig(
         level=level,
         format="%(levelname)s - %(asctime)s - [%(name)s] - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
-            logging.FileHandler(log_file, mode="w"),
-            logging.StreamHandler(),
+            logging.FileHandler(log_file, mode="w", encoding="utf-8"),
+            logging.StreamHandler(console_stream),
         ],
     )
 
