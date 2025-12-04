@@ -97,7 +97,20 @@ CHUNK_SIZE=200_000
 LOG_LEVEL=INFO
 ```
 
-## 📊 Diagrama do Banco de Dados (ER)
+## � Performance e Robustez
+
+- Tabelas `UNLOGGED` aceleram a escrita inicial; restrições e índices são aplicados depois.
+- `COPY FROM STDIN` minimiza overhead de operações de inserção individuais.
+- Processamento em _chunks_ evita estouro de memória com arquivos grandes.
+- `VERIFY_ZIP_INTEGRITY=true` habilita verificação de integridade de ZIPs.
+- `RATE_LIMIT_PER_SEC` (>0) ativa limitação de taxa de download.
+
+## ✅ Testes
+
+- Unitários: execute `pytest -q`.
+- Integração (requer Postgres): defina `PG_INTEGRATION=1` e variáveis de banco no `.env`, depois rode `pytest -q -m integration`.
+
+## �📊 Diagrama do Banco de Dados (ER)
 
 Também pode ser visualizado em um PDF direto no [Site da receita](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf)
 Há uma versão em markdown em `docs`.
