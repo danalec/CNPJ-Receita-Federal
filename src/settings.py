@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     strict_fk_validation: bool = True
     auto_repair_level: Literal["none", "basic", "aggressive"] = "basic"
+    telemetry_max_bytes: int = 10_000_000
+    quarantine_max_bytes: int = 10_000_000
+    telemetry_rotate_daily: bool = True
+    quarantine_rotate_daily: bool = True
 
     user_agent_rotation: Literal["random", "sequential"] = "random"
     user_agents: list[str] = []

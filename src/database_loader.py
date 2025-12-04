@@ -99,41 +99,56 @@ def _ensure_domains_loaded(conn, domains, strict):
 
 
 def _validate_fk_set(df, column, valid_set, label, strict):
-    vals = set(df[column].dropna().unique()) if column in df.columns else set()
-    missing = vals - valid_set
-    if missing:
+    if column not in df.columns:
+        return None
+    mask_valid = df[column].isin(valid_set)
+    mask_invalid = (~mask_valid) & df[column].notna()
+    if mask_invalid.any():
         if strict:
-            sample = list(missing)[:10]
-            raise ValueError(f"Valores inválidos em '{label}': {sample} (total {len(missing)}). Garanta que a tabela de domínio está carregada e os códigos são válidos.")
+            sample = list(set(df.loc[mask_invalid, column].astype(object).tolist()))[:10]
+            # Return mask to allow caller to quarantine before raising
+            raise ValueError(f"Valores inválidos em '{label}': {sample} (total {int(mask_invalid.sum())}). Garanta que a tabela de domínio está carregada e os códigos são válidos.")
         else:
-            mask = df[column].isin(valid_set) if column in df.columns else None
-            if mask is not None:
-                df.loc[~mask, column] = pd.NA
-            logger.warning(f"Valores inválidos em '{label}' foram definidos como nulos. Total {len(missing)}.")
+            df.loc[mask_invalid, column] = pd.NA
+            logger.warning(f"Valores inválidos em '{label}' foram definidos como nulos. Total {int(mask_invalid.sum())}.")
+    return mask_invalid
 
 
 def validate_chunk(config_name, chunk_df, conn):
+    fk_violations = {}
     if config_name == "empresas":
         _ensure_domains_loaded(conn, ["naturezas_juridicas", "qualificacoes_socios"], settings.strict_fk_validation)
         nat = _get_domain_set(conn, "naturezas_juridicas", "codigo")
         qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
         if "natureza_juridica_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "natureza_juridica_codigo", nat, "natureza_juridica_codigo", settings.strict_fk_validation)
+            m = _validate_fk_set(chunk_df, "natureza_juridica_codigo", nat, "natureza_juridica_codigo", settings.strict_fk_validation)
+            if m is not None and m.any():
+                fk_violations["natureza_juridica_codigo"] = m
         if "qualificacao_responsavel" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "qualificacao_responsavel", qual, "qualificacao_responsavel", settings.strict_fk_validation)
+            m = _validate_fk_set(chunk_df, "qualificacao_responsavel", qual, "qualificacao_responsavel", settings.strict_fk_validation)
+            if m is not None and m.any():
+                fk_violations["qualificacao_responsavel"] = m
     elif config_name == "estabelecimentos":
         _ensure_domains_loaded(conn, ["paises", "municipios", "cnaes", "empresas"], settings.strict_fk_validation)
         paises = _get_domain_set(conn, "paises", "codigo")
         municipios = _get_domain_set(conn, "municipios", "codigo")
         cnaes = _get_domain_set(conn, "cnaes", "codigo")
         if "pais_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo", settings.strict_fk_validation)
+            m = _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo", settings.strict_fk_validation)
+            if m is not None and m.any():
+                fk_violations["pais_codigo"] = m
         if "municipio_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "municipio_codigo", municipios, "municipio_codigo", settings.strict_fk_validation)
+            m = _validate_fk_set(chunk_df, "municipio_codigo", municipios, "municipio_codigo", settings.strict_fk_validation)
+            if m is not None and m.any():
+                fk_violations["municipio_codigo"] = m
         if "cnae_fiscal_principal_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "cnae_fiscal_principal_codigo", cnaes, "cnae_fiscal_principal_codigo", settings.strict_fk_validation)
+            m = _validate_fk_set(chunk_df, "cnae_fiscal_principal_codigo", cnaes, "cnae_fiscal_principal_codigo", settings.strict_fk_validation)
+            if m is not None and m.any():
+                fk_violations["cnae_fiscal_principal_codigo"] = m
         if "uf" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "uf", UF_SET, "uf", settings.strict_fk_validation)
+            m = _validate_fk_set(chunk_df, "uf", UF_SET, "uf", settings.strict_fk_validation)
+            if m is not None and m.any():
+                fk_violations["uf"] = m
         if "cnae_fiscal_secundaria" in chunk_df.columns:
             s = chunk_df["cnae_fiscal_secundaria"].dropna().astype(str)
             bad = ~((s.str.startswith("{") & s.str.endswith("}")) | (s == ""))
@@ -143,16 +158,24 @@ def validate_chunk(config_name, chunk_df, conn):
                 else:
                     chunk_df.loc[bad.index[bad], "cnae_fiscal_secundaria"] = None
                     logger.warning("Valores inválidos em cnae_fiscal_secundaria foram definidos como nulos.")
+                    fk_violations["cnae_fiscal_secundaria_fmt"] = bad
     elif config_name == "socios":
         _ensure_domains_loaded(conn, ["paises", "qualificacoes_socios", "empresas"], settings.strict_fk_validation)
         paises = _get_domain_set(conn, "paises", "codigo")
         qual = _get_domain_set(conn, "qualificacoes_socios", "codigo")
         if "pais_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo", settings.strict_fk_validation)
+            m = _validate_fk_set(chunk_df, "pais_codigo", paises, "pais_codigo", settings.strict_fk_validation)
+            if m is not None and m.any():
+                fk_violations["pais_codigo"] = m
         if "qualificacao_socio_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "qualificacao_socio_codigo", qual, "qualificacao_socio_codigo", settings.strict_fk_validation)
+            m = _validate_fk_set(chunk_df, "qualificacao_socio_codigo", qual, "qualificacao_socio_codigo", settings.strict_fk_validation)
+            if m is not None and m.any():
+                fk_violations["qualificacao_socio_codigo"] = m
         if "qualificacao_representante_legal_codigo" in chunk_df.columns:
-            _validate_fk_set(chunk_df, "qualificacao_representante_legal_codigo", qual, "qualificacao_representante_legal_codigo", settings.strict_fk_validation)
+            m = _validate_fk_set(chunk_df, "qualificacao_representante_legal_codigo", qual, "qualificacao_representante_legal_codigo", settings.strict_fk_validation)
+            if m is not None and m.any():
+                fk_violations["qualificacao_representante_legal_codigo"] = m
+    return fk_violations
 
 
 def sanitize_dates(df, date_columns):
@@ -346,8 +369,32 @@ ETL_CONFIG = {
 # --- Processador ---
 
 
-def _write_jsonl(path: Path, record: dict):
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _jsonl_dir(kind: str) -> Path:
+    base = settings.telemetry_dir if kind == "telemetry" else settings.quarantine_dir
+    rotate = settings.telemetry_rotate_daily if kind == "telemetry" else settings.quarantine_rotate_daily
+    if rotate:
+        d = datetime.utcnow().strftime("%Y%m%d")
+        return base / d
+    return base
+
+
+def _select_jsonl_file(dir_path: Path, base_name: str, max_bytes: int) -> Path:
+    dir_path.mkdir(parents=True, exist_ok=True)
+    base = dir_path / f"{base_name}.jsonl"
+    if not base.exists() or base.stat().st_size < max_bytes:
+        return base
+    idx = 1
+    while True:
+        p = dir_path / f"{base_name}_{idx}.jsonl"
+        if not p.exists() or p.stat().st_size < max_bytes:
+            return p
+        idx += 1
+
+
+def _write_jsonl(kind: str, config_name: str, record: dict):
+    max_bytes = settings.telemetry_max_bytes if kind == "telemetry" else settings.quarantine_max_bytes
+    dir_path = _jsonl_dir(kind)
+    path = _select_jsonl_file(dir_path, config_name, max_bytes)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
@@ -403,7 +450,7 @@ def process_and_load_file(conn, config_name):
             "timestamp": datetime.utcnow().isoformat(),
             **telemetry,
         }
-        _write_jsonl(settings.telemetry_dir / f"{config_name}.jsonl", telemetry_record)
+        _write_jsonl("telemetry", config_name, telemetry_record)
 
         crit = _critical_fields(config_name)
         if crit:
@@ -416,7 +463,8 @@ def process_and_load_file(conn, config_name):
                         bad = bad.where(pd.notna(bad), None)
                         for rec in bad.to_dict(orient="records"):
                             _write_jsonl(
-                                settings.quarantine_dir / f"{config_name}.jsonl",
+                                "quarantine",
+                                config_name,
                                 {
                                     "table": table_name,
                                     "config": config_name,
@@ -429,7 +477,28 @@ def process_and_load_file(conn, config_name):
                             )
                     except Exception:
                         pass
-        validate_chunk(config_name, chunk, conn)
+        fk_info = validate_chunk(config_name, chunk, conn)
+        if isinstance(fk_info, dict) and fk_info:
+            for label, mask in fk_info.items():
+                try:
+                    bad = chunk.loc[mask].copy()
+                    bad = bad.where(pd.notna(bad), None)
+                    for rec in bad.to_dict(orient="records"):
+                        _write_jsonl(
+                            "quarantine",
+                            config_name,
+                            {
+                                "table": table_name,
+                                "config": config_name,
+                                "chunk": i + 1,
+                                "reason": "fk_violation",
+                                "fields": [label],
+                                "row": rec,
+                                "timestamp": datetime.utcnow().isoformat(),
+                            },
+                        )
+                except Exception:
+                    pass
 
         # Passa a conexão direta
         fast_load_chunk(conn, chunk, table_name)

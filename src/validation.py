@@ -87,6 +87,20 @@ def validate(config_name: str, df: pd.DataFrame):
     if level == "none":
         return df, {"level": level, "after_nulls": {}, "null_deltas": {}, "columns": list(df.columns)}
     before_nulls = {c: int(df[c].isna().sum()) for c in df.columns}
+    cols_for_diff = []
+    if level == "aggressive":
+        if config_name == "estabelecimentos":
+            cols_for_diff = [
+                "cnpj_basico","cnpj_ordem","cnpj_dv","uf","cep",
+                "cnae_fiscal_principal_codigo","cnae_fiscal_secundaria","correio_eletronico"
+            ]
+        elif config_name == "socios":
+            cols_for_diff = ["cnpj_basico","cnpj_cpf_socio","representante_legal_cpf"]
+        elif config_name == "empresas":
+            cols_for_diff = ["cnpj_basico","razao_social"]
+        elif config_name == "simples":
+            cols_for_diff = ["cnpj_basico"]
+    snapshot = {c: df[c].astype(str).copy() for c in cols_for_diff if c in df.columns}
 
     def _digits_only(s: pd.Series) -> pd.Series:
         return s.astype(str).str.replace(r"\D+", "", regex=True)
@@ -211,10 +225,27 @@ def validate(config_name: str, df: pd.DataFrame):
     repaired = {c: v for c, v in after_nulls.items() if v}
     if repaired:
         logger.info(f"Auto-repair: nullified/cleaned values per column: {repaired}")
+    sample_diffs = {}
+    if level == "aggressive" and snapshot:
+        for c, before in snapshot.items():
+            if c in df.columns:
+                after = df[c].astype(str)
+                changed = before != after
+                if changed.any():
+                    pairs = (
+                        pd.DataFrame({"before": before, "after": after})
+                        .loc[changed]
+                        .dropna()
+                        .head(10)
+                        .to_dict(orient="records")
+                    )
+                    if pairs:
+                        sample_diffs[c] = pairs
     telemetry = {
         "level": level,
         "after_nulls": after_nulls,
         "null_deltas": deltas,
         "columns": list(df.columns),
+        "sample_diffs": sample_diffs,
     }
     return df, telemetry
