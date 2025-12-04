@@ -1,6 +1,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Literal, Optional
 from .settings import settings
 
 logger = logging.getLogger(__name__)
@@ -67,3 +68,25 @@ def print_status(date: str | None, return_map: bool = False):
     if return_map:
         return m
     return None
+
+
+StepStatus = Literal["pending", "running", "completed", "failed"]
+
+
+class PipelineState:
+    def __init__(self, date: Optional[str] = None):
+        if date is None:
+            date = get_run_for_date()
+        self.date = date or "session"
+        start_run(self.date)
+
+    def should_skip(self, step: str) -> bool:
+        d = _read()
+        m = d.get(self.date, {})
+        return m.get(step, "pending") == "completed"
+
+    def update(self, step: str, status: StepStatus) -> None:
+        mark_stage(self.date, step, status)
+
+
+state = PipelineState()

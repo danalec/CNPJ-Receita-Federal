@@ -19,6 +19,15 @@ def get_source_files(directory: Path, output_filepath: Path) -> List[Path]:
     return [f for f in directory.iterdir() if f.is_file() and f != output_filepath]
 
 
+def get_source_csv_files(directory: Path, output_filename: str) -> List[Path]:
+    output_filepath = directory / output_filename
+    return [
+        f
+        for f in directory.iterdir()
+        if f.is_file() and f.suffix.lower() == ".csv" and f != output_filepath
+    ]
+
+
 def concatenate_files_in_directory(dir_path: Path, delete_sources: bool = False):
     """
     Concatena TODOS os bytes de todos os arquivos de origem,
