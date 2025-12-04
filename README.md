@@ -114,6 +114,29 @@ CHUNK_SIZE=200_000
 LOG_LEVEL=INFO
 ```
 
+### Variáveis do `.env`
+
+| Variável                 | Descrição                                                     | Padrão |
+|--------------------------|---------------------------------------------------------------|--------|
+| `RFB_BASE_URL`           | URL base da Receita para os dados abertos do CNPJ            | ver acima |
+| `POSTGRES_USER`          | Usuário do PostgreSQL                                        | —      |
+| `POSTGRES_PASSWORD`      | Senha do PostgreSQL                                          | —      |
+| `POSTGRES_HOST`          | Host do banco (ex.: `localhost`, `db`)                       | —      |
+| `POSTGRES_PORT`          | Porta do banco                                               | `5432` |
+| `POSTGRES_DATABASE`      | Nome do banco de dados                                       | —      |
+| `FILE_ENCODING`          | Encoding dos CSVs da Receita                                 | `latin1` |
+| `CHUNK_SIZE`             | Linhas por chunk no Pandas                                   | `200000` |
+| `LOG_LEVEL`              | Nível de log (`DEBUG`, `INFO`, `WARNING`, `ERROR`)           | `INFO` |
+| `MAX_WORKERS`            | Downloads simultâneos                                        | `4` |
+| `EXTRACT_WORKERS`        | Paralelismo na extração de ZIPs                              | `2` |
+| `DOWNLOAD_CHUNK_SIZE`    | Tamanho do buffer de download em bytes                       | `8192` |
+| `USE_UNLOGGED`           | Cria tabelas como `UNLOGGED` na carga inicial                | `true` |
+| `SET_LOGGED_AFTER_COPY`  | Retorna tabelas a `LOGGED` após a carga                      | `true` |
+| `CLUSTER_AFTER_COPY`     | Aplica `CLUSTER` ao final (muito lento)                      | `false` |
+| `SKIP_CONSTRAINTS`       | Pular criação de PKs, FKs e índices                          | `false` |
+| `NORMALIZE_LINE_ENDINGS` | Normaliza quebras de linha                                   | `true` |
+| `STRIP_BOM`              | Remove BOM do início dos arquivos                            | `true` |
+
 ## Performance e robustez
 
 - Tabelas `UNLOGGED` aceleram a escrita inicial; restrições e índices são aplicados depois.
