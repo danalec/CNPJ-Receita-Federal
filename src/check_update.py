@@ -1,7 +1,8 @@
 import requests
 import logging
 import shutil
-from typing import Optional
+from typing import Optional, cast
+from pathlib import Path
 from bs4 import BeautifulSoup
 import re
 
@@ -48,7 +49,7 @@ def get_latest_remote_date() -> Optional[str]:
 
 def get_local_version() -> Optional[str]:
     """Lê a última versão processada do arquivo de estado."""
-    state_file = settings.state_file
+    state_file = cast(Path, settings.state_file)
 
     if state_file.exists():
         return state_file.read_text().strip()
@@ -57,7 +58,7 @@ def get_local_version() -> Optional[str]:
 
 def update_local_version(version) -> None:
     """Salva a nova versão no arquivo de estado."""
-    settings.state_file.write_text(version)
+    cast(Path, settings.state_file).write_text(version)
 
 
 def clean_data_dirs() -> None:
@@ -67,8 +68,8 @@ def clean_data_dirs() -> None:
     """
     logger.info("Limpando diretórios de dados antigos...")
 
-    compressed_dir = settings.compressed_dir
-    extracted_dir = settings.extracted_dir
+    compressed_dir = cast(Path, settings.compressed_dir)
+    extracted_dir = cast(Path, settings.extracted_dir)
 
     # Limpa compressed_files
     for item in compressed_dir.glob("*"):

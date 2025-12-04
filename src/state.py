@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, cast
 from .settings import settings
 
 logger = logging.getLogger(__name__)
@@ -10,7 +10,7 @@ STAGES = ["check", "download", "extract", "consolidate", "load"]
 
 
 def _file() -> Path:
-    return settings.data_dir / "runs.json"
+    return cast(Path, settings.data_dir) / "runs.json"
 
 
 def _read() -> dict:
@@ -45,7 +45,7 @@ def mark_stage(date: str, stage: str, status: str) -> None:
 
 
 def get_run_for_date() -> str | None:
-    last = settings.state_file
+    last = cast(Path, settings.state_file)
     if last.exists():
         return last.read_text().strip()
     return None

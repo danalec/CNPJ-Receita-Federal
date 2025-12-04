@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, cast
+from src.settings import settings
 
 __all__ = [
     "get_subdirectories",
@@ -41,7 +42,6 @@ def concatenate_files_in_directory(dir_path: Path, delete_sources: bool = False)
     pois eles não têm cabeçalho. Evitando também erros de charset
     """
     logger.info(f"Iniciando processamento do diretório: '{dir_path.name}'")
-    from src.settings import settings
     output_filename = f"{dir_path.name}.csv"
     output_filepath = dir_path / output_filename
 
@@ -98,7 +98,7 @@ def run_consolidation(delete_sources: bool = False):
     logger.info("Iniciando processo de consolidação de dados...")
     from src.settings import settings
 
-    extracted_dir = settings.extracted_dir
+    extracted_dir = cast(Path, settings.extracted_dir)
 
     if not extracted_dir.exists():
         msg = f"Diretório de extração não encontrado: {extracted_dir}"

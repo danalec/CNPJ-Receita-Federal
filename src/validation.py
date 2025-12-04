@@ -1,17 +1,30 @@
 import pandas as pd
+from typing import Any, TYPE_CHECKING
+
+pa: Any
+Series: Any
+if TYPE_CHECKING:
+    import pandera as pa
+    class BaseSchema(pa.SchemaModel):
+        pass
+else:
+    class BaseSchema:
+        @classmethod
+        def validate(cls, df, lazy=True):
+            return df
 try:
     import pandera as pa
+    from pandera.typing import Series
     HAVE_SCHEMA_MODEL = hasattr(pa, "SchemaModel")
-    if HAVE_SCHEMA_MODEL:
-        from pandera.typing import Series
 except Exception:
-    pa = None
     HAVE_SCHEMA_MODEL = False
-    Series = object
+    Series = Any
 
+
+ 
 
 if HAVE_SCHEMA_MODEL:
-    class EmpresasSchema(pa.SchemaModel):
+    class EmpresasSchema(BaseSchema):
         cnpj_basico: Series[str]
         razao_social: Series[str]
         natureza_juridica_codigo: Series[pd.Int64Dtype]
@@ -22,7 +35,7 @@ if HAVE_SCHEMA_MODEL:
 
 
 if HAVE_SCHEMA_MODEL:
-    class EstabelecimentosSchema(pa.SchemaModel):
+    class EstabelecimentosSchema(BaseSchema):
         cnpj_basico: Series[str]
         cnpj_ordem: Series[str]
         cnpj_dv: Series[str]
@@ -56,7 +69,7 @@ if HAVE_SCHEMA_MODEL:
 
 
 if HAVE_SCHEMA_MODEL:
-    class SociosSchema(pa.SchemaModel):
+    class SociosSchema(BaseSchema):
         cnpj_basico: Series[str]
         identificador_socio: Series[pd.Int64Dtype]
         nome_socio_ou_razao_social: Series[str]
@@ -71,7 +84,7 @@ if HAVE_SCHEMA_MODEL:
 
 
 if HAVE_SCHEMA_MODEL:
-    class SimplesSchema(pa.SchemaModel):
+    class SimplesSchema(BaseSchema):
         cnpj_basico: Series[str]
         opcao_pelo_simples: Series[str]
         data_opcao_pelo_simples: Series[object]

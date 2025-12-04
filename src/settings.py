@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, cast
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from enum import Enum
 from pydantic import computed_field
@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     user_agent_rotation: Literal["random", "sequential"] = "random"
     user_agents: list[str] = []
 
-    allow_drop: bool = False
+    
 
     @computed_field
     def download_url(self) -> str:
@@ -93,7 +93,8 @@ class Settings(BaseSettings):
 
     @computed_field
     def state_file(self) -> Path:
-        return self.data_dir / "last_version_processed.txt"
+        base = cast(Path, self.data_dir)
+        return base / "last_version_processed.txt"
 
     @computed_field
     def data_dir(self) -> Path:
@@ -105,11 +106,13 @@ class Settings(BaseSettings):
 
     @computed_field
     def compressed_dir(self) -> Path:
-        return self.data_dir / "compressed_files"
+        base = cast(Path, self.data_dir)
+        return base / "compressed_files"
 
     @computed_field
     def extracted_dir(self) -> Path:
-        return self.data_dir / "extracted_files"
+        base = cast(Path, self.data_dir)
+        return base / "extracted_files"
 
     @computed_field
     def queries_dir(self) -> Path:
@@ -133,11 +136,11 @@ class Settings(BaseSettings):
 
     def create_dirs(self):
         """Garante que a estrutura de pastas exista."""
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        self.compressed_dir.mkdir(parents=True, exist_ok=True)
-        self.extracted_dir.mkdir(parents=True, exist_ok=True)
-        self.queries_dir.mkdir(parents=True, exist_ok=True)
+        cast(Path, self.data_dir).mkdir(parents=True, exist_ok=True)
+        cast(Path, self.log_dir).mkdir(parents=True, exist_ok=True)
+        cast(Path, self.compressed_dir).mkdir(parents=True, exist_ok=True)
+        cast(Path, self.extracted_dir).mkdir(parents=True, exist_ok=True)
+        cast(Path, self.queries_dir).mkdir(parents=True, exist_ok=True)
 
 
 # Instancia e cria diretórios
@@ -147,7 +150,7 @@ settings.create_dirs()
 
 def setup_logging():
     """Configura o logger raiz."""
-    log_file = settings.log_dir / "cnpj.log"
+    log_file = cast(Path, settings.log_dir) / "cnpj.log"
     level = getattr(logging, settings.log_level)
 
     logging.basicConfig(
