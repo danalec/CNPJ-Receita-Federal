@@ -26,11 +26,14 @@ switch ($Task) {
     & poetry run python main.py
   }
   "etl" {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
     & poetry run python main.py --step download
     & poetry run python main.py --step extract
     & poetry run python main.py --step consolidate
     & poetry run python main.py --step load
     & poetry run python main.py --step constraints
+    $sw.Stop()
+    Write-Host ("ETL concluído em {0:hh\:mm\:ss\.fff}" -f $sw.Elapsed)
   }
   "step" {
     if (-not $STEP) { Write-Error "STEP is required"; exit 2 }
