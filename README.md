@@ -8,6 +8,8 @@ Ferramenta de `ETL` (Extract, Transform, Load) de alto desempenho para baixar, t
 - Nota de integridade: eventualmente a Receita publica versões com lacunas (ex.: `2025-11` sem o código de país `150`). Se houver FKs ausentes, corrija no banco e execute `constraints.sql` para aplicar/reaplicar as restrições.
 
 ```bash
+python main.py --force
+# ou execute módulos individuais
 python -m src.<modulo>
 ```
 
@@ -19,307 +21,78 @@ python -m src.<modulo>
    - `python -m src.downloader`
    - `python -m src.extract_files`
    - `python -m src.consolidate_csv`
-   - `python -m src.database_loader`
+- `python -m src.database_loader`
+
+CLI do orquestrador (`main.py`):
+
+- `--force`: ignora histórico e roda todas as etapas
+- `--step {check,download,extract,consolidate,load,constraints}`: executa apenas a etapa informada
+- `--no-csv-filter`: desabilita filtros de CSV (linhas malformadas e vazias)
+
+### Uso no Windows (PowerShell)
+
+Sem `make`, utilize `tasks.ps1` na raiz:
+
+```powershell
+./tasks.ps1 install
+./tasks.ps1 lint
+./tasks.ps1 check
+./tasks.ps1 test
+./tasks.ps1 pipeline
+./tasks.ps1 step load
+```
 
 ## Exemplos por etapa
+Exemplos detalhados estão em `docs/`.
 
-- Verificar nova versão e preparar diretórios
-  - `python -m src.check_update`
+## Fluxo de dados
+A visão completa do fluxo está em `docs/`.
 
-- Download multithread dos ZIPs
-  - `python -c "from src.downloader import run_download; run_download()"`
-
-- Descompactação por grupos (empresas, estabelecimentos, etc.)
-  - `python -m src.extract_files`
-
-- Consolidação de CSVs (um arquivo por categoria)
-  - `python -c "from src.consolidate_csv import run_consolidation; run_consolidation()"`
-
-- Carga no PostgreSQL (COPY + limpeza por chunks)
-  - `python -c "from src.database_loader import run_loader; run_loader()"`
-
-- Aplicar constraints e índices (demorado)
-  - `python -c "from src.database_loader import run_constraints; run_constraints()"`
-
-# Fluxo de dados
-
-## 1. Verificação automática
-
-- Compara a versão online com a última processada em `data/last_version_processed.txt`.
-- Pode ser agendada (cron ou task scheduler) apontando para `main.py`.
-- Módulo: `check_update.py`.
-
-## 2. Download
-
-- Multi-thread (até 4 conexões simultâneas) com controle opcional de taxa.
-- Módulo: `downloader.py`.
-
-## 3. Descompactação
-
-- Extrai os `.zip` publicados em partes (ex.: `empresas01.zip`, `empresas02.zip`), consolidando a saída em uma pasta única.
-- Módulo: `extract_files.py`.
-
-## 4. Consolidação de CSVs
-
-- Agrupa os CSVs descompactados em **um arquivo por categoria**, simplificando a carga.
-- Módulo: `consolidate_csv.py`.
-
-## 5. Carga no banco
-
-- Inserção em massa via `psycopg` com `COPY FROM STDIN`.
-- Tabelas `UNLOGGED` para acelerar a escrita inicial.
-- Limpeza de dados: conversões de data, arrays para CNAEs, decimais, etc.
-- Aplicação de PKs, FKs e índices **após** a carga.
-- Módulo: `database_loader.py`.
-
-## Configuração e instalação
-
-### Pré-requisitos
-
-- PostgreSQL instalado e em execução.
-- Espaço em disco recomendado: **80 GB livres** (compactados + extraídos + banco).
-
-### Instalação
-
+## Instalação e configuração
 ```bash
-# Clone o repositório
-git clone https://github.com/FolcloreX/CNPJ-Receita-Federal
-cd CNPJ-Receita-Federal
-
-# Instale as dependências com Poetry
 poetry install
-poetry shell
 ```
 
-### Configuração (.env)
+- `.env` (aliases aceitos): `POSTGRES_*` e `PG*`
+- Opcional: `DATABASE_URL` (`postgresql://user:pass@host:port/db`)
+- CSV e logs: `CSV_FILTER=true`, `LOG_BACKUP_COUNT=7`, `LOG_LEVEL=INFO`
 
-Crie um arquivo `.env` na raiz do projeto, existe um exemplo `.env.example` que você também pode renomear. Em `settings.py` há mais configurações opcionais.
-
-```text
-# URL RFB
-RFB_BASE_URL="https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/"
-
-# Database configuration
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DATABASE=Dados_RFB
-
-# File configuration
-FILE_ENCODING=latin1
-CHUNK_SIZE=200_000
-
-# Logging configuration
-LOG_LEVEL=INFO
-```
-
-### Variáveis do `.env`
-
-| Variável                 | Descrição                                                     | Padrão |
-|--------------------------|---------------------------------------------------------------|--------|
-| `RFB_BASE_URL`           | URL base da Receita para os dados abertos do CNPJ            | ver acima |
-| `POSTGRES_USER`          | Usuário do PostgreSQL                                        | —      |
-| `POSTGRES_PASSWORD`      | Senha do PostgreSQL                                          | —      |
-| `POSTGRES_HOST`          | Host do banco (ex.: `localhost`, `db`)                       | —      |
-| `POSTGRES_PORT`          | Porta do banco                                               | `5432` |
-| `POSTGRES_DATABASE`      | Nome do banco de dados                                       | —      |
-| `FILE_ENCODING`          | Encoding dos CSVs da Receita                                 | `latin1` |
-| `CHUNK_SIZE`             | Linhas por chunk no Pandas                                   | `200000` |
-| `LOG_LEVEL`              | Nível de log (`DEBUG`, `INFO`, `WARNING`, `ERROR`)           | `INFO` |
-| `MAX_WORKERS`            | Downloads simultâneos                                        | `4` |
-| `EXTRACT_WORKERS`        | Paralelismo na extração de ZIPs                              | `2` |
-| `DOWNLOAD_CHUNK_SIZE`    | Tamanho do buffer de download em bytes                       | `8192` |
-| `USE_UNLOGGED`           | Cria tabelas como `UNLOGGED` na carga inicial                | `true` |
-| `SET_LOGGED_AFTER_COPY`  | Retorna tabelas a `LOGGED` após a carga                      | `true` |
-| `CLUSTER_AFTER_COPY`     | Aplica `CLUSTER` ao final (muito lento)                      | `false` |
-| `SKIP_CONSTRAINTS`       | Pular criação de PKs, FKs e índices                          | `false` |
-| `NORMALIZE_LINE_ENDINGS` | Normaliza quebras de linha                                   | `true` |
-| `STRIP_BOM`              | Remove BOM do início dos arquivos                            | `true` |
-
-## Performance e robustez
-
-- Tabelas `UNLOGGED` aceleram a escrita inicial; restrições e índices são aplicados depois.
-- `COPY FROM STDIN` minimiza overhead de operações de inserção individuais.
-- Processamento em _chunks_ evita estouro de memória com arquivos grandes.
-- `VERIFY_ZIP_INTEGRITY=true` habilita verificação de integridade de ZIPs.
-- `RATE_LIMIT_PER_SEC` (>0) ativa limitação de taxa de download.
-
-### Diagnóstico de performance
-
-- Otimize consultas críticas com `EXPLAIN ANALYZE` e índices adequados.
-- Recomendações gerais: rode `ANALYZE` após grandes cargas para atualizar estatísticas; crie índices conforme padrões de acesso.
-
-- Exemplos (SQL):
-  - Acesso por UF e CNAE principal em `estabelecimentos`:
-    - `EXPLAIN ANALYZE SELECT cnpj_basico, cnpj_ordem, uf FROM estabelecimentos WHERE uf = 'SP' AND cnae_fiscal_principal_codigo = 6201500 LIMIT 100;`
-    - Índice sugerido: `CREATE INDEX IF NOT EXISTS ix_estab_uf_cnae ON estabelecimentos (uf, cnae_fiscal_principal_codigo);`
-
-  - Junção `sócios` → `empresas` para contagem por empresa:
-    - `EXPLAIN ANALYZE SELECT e.cnpj_basico, COUNT(*) FROM socios s JOIN empresas e USING (cnpj_basico) GROUP BY e.cnpj_basico ORDER BY COUNT(*) DESC LIMIT 50;`
-    - Índices sugeridos: `CREATE INDEX IF NOT EXISTS ix_socios_cnpj ON socios (cnpj_basico);` e `CREATE INDEX IF NOT EXISTS ix_empresas_cnpj ON empresas (cnpj_basico);`
-
-  - Filtros comuns em `estabelecimentos` por município e situação:
-    - `EXPLAIN ANALYZE SELECT cnpj_basico FROM estabelecimentos WHERE municipio_codigo = 3550308 AND situacao_cadastral = 2 LIMIT 100;`
-    - Índices sugeridos: `CREATE INDEX IF NOT EXISTS ix_estab_municipio ON estabelecimentos (municipio_codigo);` e `CREATE INDEX IF NOT EXISTS ix_estab_situacao ON estabelecimentos (situacao_cadastral);`
+## Notas de performance
+Detalhes e recomendações estão em [docs/index.md](docs/index.md).
 
 ## Testes
 
-- Unitários: execute `pytest -q`.
-- Integração (requer Postgres): defina `PG_INTEGRATION=1` e variáveis de banco no `.env`, depois rode `pytest -q -m integration`.
+Execute:
 
-## Resolução de problemas
-
-- Encoding incorreto
-  - Sintomas: `UnicodeDecodeError`, caracteres estranhos nos CSVs.
-  - Ação: ajuste `FILE_ENCODING` (`latin1`, `utf-8` ou `iso-8859-1`). Se houver BOM, mantenha `STRIP_BOM=true`.
-  - Verificações:
-    - `rg -nU "^\xEF\xBB\xBF" data/extracted_files/**/*.csv`
-    - `python -c "import pandas as pd; print(pd.read_csv('data/extracted_files/empresas/empresas.csv', delimiter=';', encoding='latin1', nrows=5).head())"`
-
-- Espaço em disco insuficiente
-  - Requisito: ~80 GB livres (arquivos compactados, extraídos e banco).
-  - Ação: limpe diretórios antigos ou rode `python -m src.check_update` que limpa automaticamente.
-  - Verificações (Windows PowerShell):
-    - `Get-PSDrive -PSProvider FileSystem | Select Name, @{Name='FreeGB';Expression={"{0:N2}" -f ($_.Free/1GB)}}`
-    - Limpeza manual: `Remove-Item -Recurse -Force data\compressed_files\* ; Remove-Item -Recurse -Force data\extracted_files\*`
-
-- Lacunas de domínio (FKs ausentes)
-  - Sintomas: registros sem correspondência em tabelas de domínio.
-  - Ação: insira/ajuste códigos faltantes e execute `constraints.sql`.
-  - Consultas úteis (SQL):
-    - `SELECT COUNT(*) FROM estabelecimentos e LEFT JOIN cnaes c ON c.codigo = e.cnae_fiscal_principal_codigo WHERE c.codigo IS NULL;`
-    - `SELECT COUNT(*) FROM estabelecimentos e LEFT JOIN paises p ON p.codigo = e.pais_codigo WHERE e.pais_codigo IS NOT NULL AND p.codigo IS NULL;`
-    - `SELECT COUNT(*) FROM socios s LEFT JOIN qualificacoes_socios q ON q.codigo = s.qualificacao_socio_codigo WHERE q.codigo IS NULL;`
-
-- Estado do pipeline
-  - Arquivo de estado: `data/state.json`.
-  - Verificações: `rg -n '"target_date"|"stage"|"status"' data/state.json`
-
-## Diagrama do banco (ER)
-
-Também pode ser visualizado em um PDF direto no [Site da Receita](https://www.gov.br/receitafederal/dados/cnpj-metadados.pdf).
-- Diagrama detalhado (Markdown): [docs/diagrama_er.md](docs/diagrama_er.md)
-- Descrição dos dados (campos, layout oficial): [docs/descricao-dados.md](docs/descricao-dados.md)
-
-```mermaid
-erDiagram
-    %% ==========================================
-    %% TABELAS PRINCIPAIS
-    %% ==========================================
-
-    EMPRESAS {
-        texto   cnpj_basico PK
-        texto   razao_social
-        numerico capital_social
-        inteiro natureza_juridica_codigo FK
-        inteiro qualificacao_responsavel FK
-        inteiro porte_empresa
-        texto   ente_federativo_responsavel
-    }
-
-    ESTABELECIMENTOS {
-        texto   cnpj_basico PK, FK
-        texto   cnpj_ordem PK
-        texto   cnpj_dv PK
-        inteiro identificador_matriz_filial
-        texto   nome_fantasia
-        inteiro situacao_cadastral
-        data    data_situacao_cadastral
-        inteiro motivo_situacao_cadastral
-        inteiro pais_codigo FK
-        inteiro municipio_codigo FK
-        inteiro cnae_fiscal_principal_codigo FK
-        texto[] cnae_fiscal_secundaria
-        texto   uf
-    }
-
-    SÓCIOS {
-        texto   cnpj_basico FK
-        inteiro identificador_socio
-        texto   nome_socio_ou_razao_social
-        texto   cnpj_cpf_socio
-        inteiro qualificacao_socio_codigo FK
-        inteiro pais_codigo FK
-        inteiro qualificacao_representante_legal_codigo FK
-    }
-
-    SIMPLES {
-        texto   cnpj_basico PK, FK
-        texto   opcao_pelo_simples
-        data    data_opcao_pelo_simples
-        data    data_exclusao_do_simples
-        texto   opcao_pelo_mei
-    }
-
-    %% ==========================================
-    %% TABELAS DE DOMÍNIO
-    %% ==========================================
-
-    NATUREZAS_JURÍDICAS {
-        inteiro codigo PK
-        texto   nome
-    }
-
-    QUALIFICAÇÕES_SÓCIOS {
-        inteiro codigo PK
-        texto   nome
-    }
-
-    CNAES {
-        inteiro codigo PK
-        texto   nome
-    }
-
-    PAÍSES {
-        inteiro codigo PK
-        texto   nome
-    }
-
-    MUNICÍPIOS {
-        inteiro codigo PK
-        texto   nome
-    }
-
-    %% ==========================================
-    %% RELACIONAMENTOS
-    %% ==========================================
-
-    EMPRESAS ||--|{ ESTABELECIMENTOS : "possui (1:N)"
-    EMPRESAS ||--o{ SÓCIOS           : "tem (1:N)"
-    EMPRESAS ||--o| SIMPLES          : "pode ter (1:1)"
-
-    EMPRESAS }|--|| NATUREZAS_JURÍDICAS   : "tipo de"
-    EMPRESAS }|--|| QUALIFICAÇÕES_SÓCIOS  : "qualif. responsável"
-
-    ESTABELECIMENTOS }|--|| MUNICÍPIOS : "localizado em"
-    ESTABELECIMENTOS }|--|| PAÍSES     : "localizado em"
-    ESTABELECIMENTOS }|--|| CNAES      : "atividade principal"
-
-    SÓCIOS }|--|| PAÍSES                : "nacionalidade"
-    SÓCIOS }|--|| QUALIFICAÇÕES_SÓCIOS  : "qualif. sócio"
+```bash
+pytest -q
 ```
+
+## Documentação
+
+Para conteúdo aprofundado (fluxo, exemplos por módulo, troubleshooting, diagrama ER), consulte [docs/](docs/):
+- [Descrição dos dados](docs/descricao-dados.md)
+- [Diagrama ER](docs/diagrama_er.md)
+- Pasta local (Windows): [c:\Users\danalec\Documents\src\CNPJ-Receita-Federal\docs](file:///c:/Users/danalec/Documents/src/CNPJ-Receita-Federal/docs)
+
+## Contribuição
+
+- Abra issues para relatar inconsistências ou propor melhorias.
+- Envie PRs com otimizações de performance, confiabilidade e manutenção.
 
 ### Explicação visual das ligações
 
 1. **EMPRESAS (Central)**: É a tabela pai. Ela conecta com:
-
    - **ESTABELECIMENTOS**: Ligação forte (PK composta). Uma empresa pode ter várias filiais.
-
    - **SÓCIOS**: Uma empresa tem vários sócios.
-
    - **SIMPLES**: Uma empresa pode ou não ter registro no Simples (0 ou 1).
 
 2. **ESTABELECIMENTOS**:
-
    - Conecta com **CNAES** (atividade econômica).
-
    - Conecta com **MUNICÍPIOS** e **PAÍSES** (geografia).
-
    - Nota: `cnae_fiscal_secundaria` é um **array** de texto para performance (em vez de tabela associativa N:N), embora represente códigos CNAE.
 
 3. **SOCIOS**:
-
    - Conecta com **QUALIFICAÇÕES** (diretor, presidente, etc.).
 
 ## Contribuição
