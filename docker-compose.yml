@@ -23,6 +23,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-    command: ["--force"]
+    command: ["python","main.py","--force"]
 volumes:
   pgdata:

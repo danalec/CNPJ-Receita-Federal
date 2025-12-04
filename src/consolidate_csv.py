@@ -17,12 +17,14 @@ def get_subdirectories(base_path: Path):
 
 
 def get_source_csv_files(directory: Path, output_filename: str) -> List[Path]:
-    """
-    Encontra todos os arquivos .csv (case-insensitive), ignorando o arquivo de saída.
-    """
+    output_lower = output_filename.lower()
     all_items = list(directory.iterdir())
     files = [p for p in all_items if p.is_file()]
-    return [f for f in files if f.name.lower().endswith(".csv") and f.name != output_filename]
+    return [
+        f
+        for f in files
+        if f.name.lower().endswith(".csv") and f.name.lower() != output_lower
+    ]
 
 
 def concatenate_files_in_directory(dir_path: Path):

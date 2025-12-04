@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 import re
 
 from .settings import settings, state, StepStatus, PipelineStep
+from .downloader import build_headers
 
 # Configura logger local para este script
 logger = logging.getLogger("updater")
@@ -18,7 +19,7 @@ def get_latest_remote_date() -> str:
     Retorna uma string ex: '2025-11'
     """
     try:
-        response = requests.get(settings.rfb_base_url, timeout=30)
+        response = requests.get(settings.rfb_base_url, timeout=30, headers=build_headers(settings.rfb_base_url))
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
