@@ -1,13 +1,15 @@
 import os
 from pathlib import Path
-import psycopg2
 import pytest
 
 from src.settings import settings
 from src.database_loader import run_loader, run_constraints
 
+def _should_run_integration() -> bool:
+    return bool(settings.database_uri) and os.environ.get("PG_INTEGRATION") == "1"
 
 @pytest.mark.integration
+@pytest.mark.skipif(not _should_run_integration(), reason="Integration tests disabled")
 def test_loader_and_constraints_with_sample_domain_data(tmp_path: Path):
     settings.project_root = tmp_path
     settings.allow_drop = True
@@ -83,6 +85,7 @@ def test_loader_and_constraints_with_sample_domain_data(tmp_path: Path):
     run_loader()
     run_constraints()
 
+    import psycopg2
     conn = psycopg2.connect(settings.database_uri)
     cur = conn.cursor()
 

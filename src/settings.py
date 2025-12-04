@@ -79,6 +79,11 @@ class Settings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     strict_fk_validation: bool = True
 
+    user_agent_rotation: Literal["random", "sequential"] = "random"
+    user_agents: list[str] = []
+
+    allow_drop: bool = False
+
     @computed_field
     def download_url(self) -> str:
         """Monta a URL completa baseada na data alvo."""
@@ -164,13 +169,9 @@ class PipelineStep(Enum):
     LOAD = "load"
 
 
-from .state import state, StepStatus  # re-export for typing compatibility
-
 __all__ = [
     "Settings",
     "settings",
     "setup_logging",
     "PipelineStep",
-    "state",
-    "StepStatus",
 ]

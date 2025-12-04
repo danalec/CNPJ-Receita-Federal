@@ -1,6 +1,5 @@
 import os
 import pytest
-import pandas as pd
 
 from src.settings import settings
 
@@ -15,6 +14,7 @@ def _should_run_integration() -> bool:
 @pytest.mark.skipif(not _should_run_integration(), reason="Integration tests disabled")
 def test_psycopg_copy_into_temp_table():
     import psycopg2
+    import pandas as pd
     from src.database_loader import fast_load_chunk
 
     df = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})

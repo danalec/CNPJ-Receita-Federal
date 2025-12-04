@@ -73,10 +73,11 @@ def get_session(referrer: Optional[str] = None):
     session = requests.Session()
     session.headers.update(build_headers(referrer))
     retry = Retry(
-        total=3,  # Tenta 3 vezes
-        backoff_factor=3,  # Espera 1s, 2s, 4s... entre tentativas
-        status_forcelist=[500, 502, 503, 504],  # Retenta se o servidor der erro
+        total=3,
+        backoff_factor=3,
+        status_forcelist=[429, 500, 502, 503, 504],
         allowed_methods=["HEAD", "GET", "OPTIONS"],
+        respect_retry_after_header=True,
     )
     adapter = HTTPAdapter(max_retries=retry)
     session.mount("https://", adapter)

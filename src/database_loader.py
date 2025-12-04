@@ -403,17 +403,20 @@ def execute_sql_file(conn, filename):
     logger.info(f"Executando SQL: {filename}")
     with open(file_path, "r", encoding="utf-8") as f:
         sql_content = f.read()
+    if filename == "schema.sql" and getattr(settings, "allow_drop", False):
+        sql_content = "SET app.allow_drop='1';\n" + sql_content
     if filename == "schema.sql" and not settings.use_unlogged:
         sql_content = sql_content.replace("CREATE UNLOGGED TABLE", "CREATE TABLE")
 
     try:
-        # Configura GUCs conforme settings
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute("SET app.allow_drop = %s", ('1' if getattr(settings, 'allow_drop', False) else '0',))
-        except Exception:
-            pass
-        if "CONCURRENTLY" in sql_content:
+        if filename == "schema.sql":
+            try:
+                with conn.cursor() as cursor:
+                    cursor.execute("SET app.allow_drop = %s", ('1' if getattr(settings, 'allow_drop', False) else '0',))
+            except Exception:
+                pass
+        needs_autocommit = ("CONCURRENTLY" in sql_content) or (filename == "constraints.sql")
+        if needs_autocommit:
             old_autocommit = conn.autocommit
             try:
                 conn.autocommit = True
@@ -427,8 +430,8 @@ def execute_sql_file(conn, filename):
         else:
             with conn.cursor() as cursor:
                 cursor.execute(sql_content)
-        conn.commit()
-        logger.info(f"Sucesso ao executar {filename}")
+            conn.commit()
+            logger.info(f"Sucesso ao executar {filename}")
     except Exception as e:
         conn.rollback()
         logger.error(f"ERRO ao executar SQL de {filename}: {e}")

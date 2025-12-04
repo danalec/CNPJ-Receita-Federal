@@ -5,8 +5,8 @@ import time
 
 from enum import Enum
 from . import extract_files, downloader, consolidate_csv, database_loader, check_update
-from .settings import setup_logging, settings
-from .state import state, StepStatus
+from .settings import setup_logging
+from .state import state
 
 
 class PipelineStep(Enum):
