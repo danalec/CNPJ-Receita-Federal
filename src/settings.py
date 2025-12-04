@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     rfb_base_url: str = Field(
         default="https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/",
         description="URL Base da Receita Federal onde ficam as pastas por data.",
-        validation_alias=AliasChoices("RFB_BASE_URL"),
+        env=("RFB_BASE_URL",),
     )
 
     target_date: str = Field(
@@ -73,31 +73,31 @@ class Settings(BaseSettings):
     # --- Banco de Dados (Obrigatórios) ---
     postgres_user: str = Field(
         description="Usuário do PostgreSQL.",
-        validation_alias=AliasChoices("POSTGRES_USER", "PGUSER"),
+        env=("POSTGRES_USER", "PGUSER"),
     )
     postgres_password: str = Field(
         description="Senha do PostgreSQL.",
-        validation_alias=AliasChoices("POSTGRES_PASSWORD", "PGPASSWORD"),
+        env=("POSTGRES_PASSWORD", "PGPASSWORD"),
     )
     postgres_host: str = Field(
         description="Host do banco (ex: localhost, db).",
-        validation_alias=AliasChoices("POSTGRES_HOST", "PGHOST"),
+        env=("POSTGRES_HOST", "PGHOST"),
     )
     postgres_port: int = Field(
         default=5432,
         description="Porta do banco.",
-        validation_alias=AliasChoices("POSTGRES_PORT", "PGPORT"),
+        env=("POSTGRES_PORT", "PGPORT"),
     )
     postgres_database: str = Field(
         description="Nome do banco de dados.",
-        validation_alias=AliasChoices("POSTGRES_DATABASE", "PGDATABASE"),
+        env=("POSTGRES_DATABASE", "PGDATABASE"),
     )
 
     # --- URL de conexão completa (opcional) ---
     database_url: Optional[str] = Field(
         default=None,
         description="URL completa de conexão (ex.: postgresql://user:pass@host:port/db).",
-        validation_alias=AliasChoices("DATABASE_URL"),
+        env=("DATABASE_URL",),
     )
 
     # --- Performance de Download/Extração ---
@@ -158,7 +158,7 @@ class Settings(BaseSettings):
     file_encoding: str = Field(
         default="latin1",
         description="Encoding original dos arquivos da Receita (geralmente latin1/iso-8859-1).",
-        validation_alias=AliasChoices("FILE_ENCODING"),
+        env=("FILE_ENCODING",),
     )
 
     chunk_size: int = Field(
@@ -167,27 +167,27 @@ class Settings(BaseSettings):
             "Quantidade de linhas lidas por vez na memória (Pandas Chunk). "
             "Aumentar consome mais RAM, diminuir deixa o processo mais lento."
         ),
-        validation_alias=AliasChoices("CHUNK_SIZE"),
+        env=("CHUNK_SIZE",),
     )
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
         default="INFO",
         description="Nível de detalhe dos logs.",
-        validation_alias=AliasChoices("LOG_LEVEL"),
+        env=("LOG_LEVEL",),
     )
 
     # --- Rotação de logs ---
     log_backup_count: int = Field(
         default=7,
         description="Quantidade de arquivos de log mantidos na rotação diária.",
-        validation_alias=AliasChoices("LOG_BACKUP_COUNT"),
+        env=("LOG_BACKUP_COUNT",),
     )
 
     # --- Filtro de CSV ---
     csv_filter: bool = Field(
         default=True,
         description="Pula linhas malformadas e descarta linhas completamente vazias.",
-        validation_alias=AliasChoices("CSV_FILTER"),
+        env=("CSV_FILTER",),
     )
 
     @computed_field

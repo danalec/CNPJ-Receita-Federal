@@ -19,6 +19,12 @@ def get_session():
     Isso torna o download resiliente a falhas de rede momentâneas.
     """
     session = requests.Session()
+    session.headers.update(
+        {
+            "User-Agent": "cnpj-etl/0.1 (+https://github.com/folclore/cnpj-receita-federal)",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        }
+    )
     retry = Retry(
         total=3,  # Tenta 3 vezes
         backoff_factor=3,  # Espera 1s, 2s, 4s... entre tentativas

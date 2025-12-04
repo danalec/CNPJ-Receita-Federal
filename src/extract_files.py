@@ -1,7 +1,7 @@
 import zipfile
 import os
 from pathlib import Path
-from itertools import groupby
+from itertools import groupby, takewhile
 from typing import List, Iterator, Tuple
 import logging
 from .settings import settings
@@ -15,7 +15,7 @@ def get_file_base_name(path: Path) -> str:
     Extrai o nome base de um arquivo, removendo números e a extensão.
     Exemplo: "Empresas4.zip" -> "Empresas"
     """
-    base = "".join(__import__("itertools").takewhile(str.isalpha, path.stem))
+    base = "".join(takewhile(str.isalpha, path.stem))
     return base or "desconhecido"
 
 

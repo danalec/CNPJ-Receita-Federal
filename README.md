@@ -57,6 +57,9 @@ Sem `make`, utilize `tasks.ps1` na raiz:
 Variáveis suportadas (aliases aceitos: `POSTGRES_*` e `PG*`). Opcional: `DATABASE_URL`.
 Suportados também: `LOG_LEVEL`, `LOG_BACKUP_COUNT`, `CSV_FILTER`, `FILE_ENCODING`, `CHUNK_SIZE`.
 
+### Estado do pipeline
+- O progresso é persistido em `data/state.json`. Este arquivo registra a `target_date`, o `stage` atual e o `status` de execução, permitindo retomada automática e `--force` para reprocessar todas as etapas.
+
 ```ini
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
@@ -77,6 +80,8 @@ Exemplos detalhados estão em `docs/`.
 
 ## Fluxo de dados
 A visão completa do fluxo está em `docs/`.
+
+Tabelas são criadas no schema `rfb` do PostgreSQL para isolamento e organização.
 
 ## Instalação e configuração
 ```bash
@@ -116,6 +121,11 @@ Para conteúdo aprofundado (fluxo, exemplos por módulo, troubleshooting, diagra
   ```
 - FKs ausentes em versões da Receita: corrija as lacunas e aplique/reaplique restrições com `src/constraints.sql` via `--step constraints`.
 - Erros de conexão com banco: valide `DATABASE_URL` ou variáveis `POSTGRES_*`.
+
+### Migração para o schema `rfb`
+- Caso você tenha tabelas pré-existentes no schema `public`, use `src/migrate_to_rfb.sql` para movê-las com segurança para `rfb`:
+  - `psql "$DATABASE_URL" -f src/migrate_to_rfb.sql`
+  - Isso preserva índices e FKs enquanto altera apenas o schema das tabelas.
 
 ## Contribuição
 

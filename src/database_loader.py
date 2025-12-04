@@ -37,10 +37,16 @@ def fast_load_chunk(conn, df, table_name):
     try:
         with conn.cursor() as cursor:
             ident_cols = [sql.Identifier(c) for c in columns]
+            # Suporta nomes qualificados por schema (ex.: rfb.empresas)
+            if "." in table_name:
+                schema, tbl = table_name.split(".", 1)
+                table_ident = sql.SQL(".").join([sql.Identifier(schema), sql.Identifier(tbl)])
+            else:
+                table_ident = sql.Identifier(table_name)
             copy_stmt = sql.SQL(
-                "COPY {table} ({cols}) FROM STDIN WITH (FORMAT CSV, DELIMITER ';', NULL '', QUOTE '\"', HEADER FALSE)"
+                "COPY {table} ({cols}) FROM STDIN WITH (FORMAT CSV, DELIMITER ';', NULL '', QUOTE '"', HEADER FALSE)"
             ).format(
-                table=sql.Identifier(table_name),
+                table=table_ident,
                 cols=sql.SQL(", ").join(ident_cols),
             )
             cursor.copy_expert(copy_stmt.as_string(conn), output)
@@ -116,33 +122,33 @@ ETL_CONFIG = {
     # Tipar essas tabelas evita que códigos "01" virem "1" se forem lidos como int,
     # ou garante performance se forem int. Aqui assumimos int para códigos.
     "paises": {
-        "table_name": "paises",
+        "table_name": "rfb.paises",
         "column_names": ["codigo", "nome"],
         "dtype_map": {"codigo": pd.Int64Dtype(), "nome": str},
     },
     "municipios": {
-        "table_name": "municipios",
+        "table_name": "rfb.municipios",
         "column_names": ["codigo", "nome"],
         "dtype_map": {"codigo": pd.Int64Dtype(), "nome": str},
     },
     "qualificacoes": {
-        "table_name": "qualificacoes_socios",
+        "table_name": "rfb.qualificacoes_socios",
         "column_names": ["codigo", "nome"],
         "dtype_map": {"codigo": pd.Int64Dtype(), "nome": str},
     },
     "naturezas": {
-        "table_name": "naturezas_juridicas",
+        "table_name": "rfb.naturezas_juridicas",
         "column_names": ["codigo", "nome"],
         "dtype_map": {"codigo": pd.Int64Dtype(), "nome": str},
     },
     "cnaes": {
-        "table_name": "cnaes",
+        "table_name": "rfb.cnaes",
         "column_names": ["codigo", "nome"],
         "dtype_map": {"codigo": pd.Int64Dtype(), "nome": str},
     },
     # --- Tabelas de Dados Principais ---
     "empresas": {
-        "table_name": "empresas",
+        "table_name": "rfb.empresas",
         "column_names": [
             "cnpj_basico",
             "razao_social",
@@ -164,7 +170,7 @@ ETL_CONFIG = {
         "custom_clean_func": clean_empresas_chunk,
     },
     "estabelecimentos": {
-        "table_name": "estabelecimentos",
+        "table_name": "rfb.estabelecimentos",
         "column_names": [
             "cnpj_basico",
             "cnpj_ordem",
@@ -232,7 +238,7 @@ ETL_CONFIG = {
         "custom_clean_func": clean_estabelecimentos_chunk,
     },
     "socios": {
-        "table_name": "socios",
+        "table_name": "rfb.socios",
         "column_names": [
             "cnpj_basico",
             "identificador_socio",
@@ -262,7 +268,7 @@ ETL_CONFIG = {
         "custom_clean_func": clean_socios_chunk,
     },
     "simples": {
-        "table_name": "simples",
+        "table_name": "rfb.simples",
         "column_names": [
             "cnpj_basico",
             "opcao_pelo_simples",
@@ -300,7 +306,7 @@ def process_and_load_file(conn, config_name) -> None:
 
     if not file_path.exists():
         logger.warning(f"Arquivo '{file_path}' não encontrado. Pulando.")
-        raise FileNotFoundError(f"Arquivo '{file_path}' não encontrado. Pulando.")
+        return
 
     logger.info(f"--- Processando tabela '{table_name}' (via '{config_name}') ---")
 
@@ -392,15 +398,15 @@ def run_loader() -> None:
             logger.info("Tornando tabelas persistentes (LOGGED) novamente...")
 
             tables = [
-                "empresas",
-                "estabelecimentos",
-                "socios",
-                "simples",
-                "paises",
-                "municipios",
-                "qualificacoes_socios",
-                "naturezas_juridicas",
-                "cnaes",
+                "rfb.empresas",
+                "rfb.estabelecimentos",
+                "rfb.socios",
+                "rfb.simples",
+                "rfb.paises",
+                "rfb.municipios",
+                "rfb.qualificacoes_socios",
+                "rfb.naturezas_juridicas",
+                "rfb.cnaes",
             ]
 
             with conn.cursor() as cursor:

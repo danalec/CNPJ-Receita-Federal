@@ -15,11 +15,11 @@ services:
     depends_on:
       - db
     environment:
-      postgres_user: ${POSTGRES_USER:-cnpj}
-      postgres_password: ${POSTGRES_PASSWORD:-cnpj}
-      postgres_host: db
-      postgres_port: 5432
-      postgres_database: ${POSTGRES_DATABASE:-cnpj}
+      POSTGRES_USER: ${POSTGRES_USER:-cnpj}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cnpj}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-cnpj}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

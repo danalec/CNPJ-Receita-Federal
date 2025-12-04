@@ -44,6 +44,9 @@ jobs:
       - name: Install dependencies (with dev)
         run: poetry install --no-interaction --with dev
 
+      - name: Dependency audit
+        run: poetry run pip-audit --progress-spinner off || true
+
       - name: Lint
         run: make lint
 
