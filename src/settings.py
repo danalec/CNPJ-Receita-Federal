@@ -147,6 +147,15 @@ class Settings(BaseSettings):
         ),
     )
 
+    allow_drop: bool = Field(
+        default=False,
+        description=(
+            "Permite DROP de tabelas ao iniciar uma nova carga (schema.sql). "
+            "Use apenas em ambientes efêmeros ou controlados."
+        ),
+        env=("ALLOW_DROP",),
+    )
+
     # --- Tratamento de Arquivos ---
     normalize_line_endings: bool = Field(
         default=True, description="Converte quebras de linha Windows/Linux para padrão."

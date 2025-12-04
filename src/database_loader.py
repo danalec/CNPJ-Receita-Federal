@@ -375,6 +375,12 @@ def run_loader() -> None:
         raise
 
     try:
+        # Define guarda de DROP conforme configuração
+        if getattr(settings, "allow_drop", False):
+            with conn.cursor() as cursor:
+                cursor.execute("SET app.allow_drop='1';")
+            conn.commit()
+
         # Cria as tabelas
         execute_sql_file(conn, "schema.sql")
 

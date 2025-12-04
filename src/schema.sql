@@ -2,13 +2,14 @@
 -- SCHEMA RFB
 -- ============================================================================
 CREATE SCHEMA IF NOT EXISTS rfb;
+SET search_path TO rfb;
 
 -- ============================================================================
 -- 1. LIMPEZA INICIAL (DROP) COM GUARDA DE ESQUEMA
 -- ============================================================================
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'rfb') THEN
+  IF current_setting('app.allow_drop', true) = '1' THEN
     EXECUTE 'DROP TABLE IF EXISTS rfb.socios CASCADE';
     EXECUTE 'DROP TABLE IF EXISTS rfb.simples CASCADE';
     EXECUTE 'DROP TABLE IF EXISTS rfb.estabelecimentos CASCADE';
