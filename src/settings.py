@@ -120,6 +120,16 @@ class Settings(BaseSettings):
         return self.project_root / "queries"
 
     @computed_field
+    def telemetry_dir(self) -> Path:
+        base = cast(Path, self.log_dir)
+        return base / "telemetry"
+
+    @computed_field
+    def quarantine_dir(self) -> Path:
+        base = cast(Path, self.log_dir)
+        return base / "quarantine"
+
+    @computed_field
     def database_uri(self) -> str:
         if not all(
             [
@@ -142,6 +152,8 @@ class Settings(BaseSettings):
         cast(Path, self.compressed_dir).mkdir(parents=True, exist_ok=True)
         cast(Path, self.extracted_dir).mkdir(parents=True, exist_ok=True)
         cast(Path, self.queries_dir).mkdir(parents=True, exist_ok=True)
+        cast(Path, self.telemetry_dir).mkdir(parents=True, exist_ok=True)
+        cast(Path, self.quarantine_dir).mkdir(parents=True, exist_ok=True)
 
 
 # Instancia e cria diretórios

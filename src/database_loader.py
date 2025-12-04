@@ -2,6 +2,8 @@ import pandas as pd
 import logging
 import io
 import re
+import json
+from datetime import datetime
 import psycopg2
 from psycopg2 import sql
 from pathlib import Path
@@ -344,6 +346,24 @@ ETL_CONFIG = {
 # --- Processador ---
 
 
+def _write_jsonl(path: Path, record: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _critical_fields(config_name: str):
+    if config_name == "empresas":
+        return ["cnpj_basico"]
+    if config_name == "estabelecimentos":
+        return ["cnpj_basico", "cnpj_ordem", "cnpj_dv"]
+    if config_name == "socios":
+        return ["cnpj_basico", "cnpj_cpf_socio"]
+    if config_name == "simples":
+        return ["cnpj_basico"]
+    return []
+
+
 def process_and_load_file(conn, config_name):
     try:
         etl_config = ETL_CONFIG[config_name]
@@ -374,7 +394,41 @@ def process_and_load_file(conn, config_name):
     for i, chunk in enumerate(reader):
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
-        chunk = schema_validate(config_name, chunk)
+        chunk, telemetry = schema_validate(config_name, chunk)
+        telemetry_record = {
+            "table": table_name,
+            "config": config_name,
+            "chunk": i + 1,
+            "rows": int(len(chunk)),
+            "timestamp": datetime.utcnow().isoformat(),
+            **telemetry,
+        }
+        _write_jsonl(settings.telemetry_dir / f"{config_name}.jsonl", telemetry_record)
+
+        crit = _critical_fields(config_name)
+        if crit:
+            cols = [c for c in crit if c in chunk.columns]
+            if cols:
+                mask = chunk[cols].isna().any(axis=1)
+                if mask.any():
+                    bad = chunk.loc[mask].copy()
+                    try:
+                        bad = bad.where(pd.notna(bad), None)
+                        for rec in bad.to_dict(orient="records"):
+                            _write_jsonl(
+                                settings.quarantine_dir / f"{config_name}.jsonl",
+                                {
+                                    "table": table_name,
+                                    "config": config_name,
+                                    "chunk": i + 1,
+                                    "reason": "critical_fields_null",
+                                    "fields": cols,
+                                    "row": rec,
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                },
+                            )
+                    except Exception:
+                        pass
         validate_chunk(config_name, chunk, conn)
 
         # Passa a conexão direta

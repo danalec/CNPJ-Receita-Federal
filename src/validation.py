@@ -81,11 +81,12 @@ class SimplesSchema(SchemaModel):
         data_exclusao_do_mei: PanderaSeries[object]
 
 
-def validate(config_name: str, df: pd.DataFrame) -> pd.DataFrame:
+def validate(config_name: str, df: pd.DataFrame):
     logger = logging.getLogger(__name__)
     level = getattr(settings, "auto_repair_level", "basic")
     if level == "none":
-        return df
+        return df, {"level": level, "after_nulls": {}, "null_deltas": {}, "columns": list(df.columns)}
+    before_nulls = {c: int(df[c].isna().sum()) for c in df.columns}
 
     def _digits_only(s: pd.Series) -> pd.Series:
         return s.astype(str).str.replace(r"\D+", "", regex=True)
@@ -205,11 +206,15 @@ def validate(config_name: str, df: pd.DataFrame) -> pd.DataFrame:
         if "cnpj_basico" in df.columns:
             df["cnpj_basico"] = _ensure_len(df["cnpj_basico"], 8)
 
-    # Metrics
-    repaired = {}
-    for col in df.columns:
-        if df[col].isna().any():
-            repaired[col] = int(df[col].isna().sum())
+    after_nulls = {c: int(df[c].isna().sum()) for c in df.columns}
+    deltas = {c: after_nulls[c] - before_nulls.get(c, 0) for c in df.columns}
+    repaired = {c: v for c, v in after_nulls.items() if v}
     if repaired:
         logger.info(f"Auto-repair: nullified/cleaned values per column: {repaired}")
-    return df
+    telemetry = {
+        "level": level,
+        "after_nulls": after_nulls,
+        "null_deltas": deltas,
+        "columns": list(df.columns),
+    }
+    return df, telemetry
