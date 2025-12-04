@@ -85,7 +85,7 @@ def validate(config_name: str, df: pd.DataFrame):
     logger = logging.getLogger(__name__)
     level = getattr(settings, "auto_repair_level", "basic")
     if level == "none":
-        return df, {"level": level, "after_nulls": {}, "null_deltas": {}, "columns": list(df.columns)}
+        return df, {"level": level, "after_nulls": {}, "null_deltas": {}, "columns": list(df.columns)}, {}
     before_nulls = {c: int(df[c].isna().sum()) for c in df.columns}
     cols_for_diff = []
     if level == "aggressive":
@@ -101,6 +101,7 @@ def validate(config_name: str, df: pd.DataFrame):
         elif config_name == "simples":
             cols_for_diff = ["cnpj_basico"]
     snapshot = {c: df[c].astype(str).copy() for c in cols_for_diff if c in df.columns}
+    masks: dict[str, pd.Series] = {}
 
     def _cpf_valid(s: str) -> bool:
         if not s or len(s) != 11 or s == s[0] * 11:
@@ -231,6 +232,7 @@ def validate(config_name: str, df: pd.DataFrame):
             if invalid_mask.any():
                 invalid_ids["estabelecimentos_cnpj"] = int(invalid_mask.sum())
                 invalid_examples["estabelecimentos_cnpj"] = full.loc[invalid_mask].head(10).tolist()
+                masks["invalid_cnpj"] = invalid_mask
         if level == "aggressive":
             if "cnae_fiscal_secundaria" in df.columns:
                 df["cnae_fiscal_secundaria"] = _dedup_sort_pg_array(df["cnae_fiscal_secundaria"]) 
@@ -300,4 +302,4 @@ def validate(config_name: str, df: pd.DataFrame):
         if "invalid_ids" in locals() and invalid_ids:
             telemetry["invalid_ids"] = invalid_ids
             telemetry["invalid_id_examples"] = invalid_examples
-    return df, telemetry
+    return df, telemetry, masks

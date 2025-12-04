@@ -441,7 +441,7 @@ def process_and_load_file(conn, config_name):
     for i, chunk in enumerate(reader):
         if "custom_clean_func" in etl_config:
             chunk = etl_config["custom_clean_func"](chunk)
-        chunk, telemetry = schema_validate(config_name, chunk)
+        chunk, telemetry, masks = schema_validate(config_name, chunk)
         telemetry_record = {
             "table": table_name,
             "config": config_name,
@@ -477,6 +477,26 @@ def process_and_load_file(conn, config_name):
                             )
                     except Exception:
                         pass
+        if config_name == "estabelecimentos" and isinstance(masks, dict) and masks.get("invalid_cnpj") is not None:
+            try:
+                bad = chunk.loc[masks["invalid_cnpj"]].copy()
+                bad = bad.where(pd.notna(bad), None)
+                for rec in bad.to_dict(orient="records"):
+                    _write_jsonl(
+                        "quarantine",
+                        config_name,
+                        {
+                            "table": table_name,
+                            "config": config_name,
+                            "chunk": i + 1,
+                            "reason": "invalid_cnpj",
+                            "fields": ["cnpj_basico","cnpj_ordem","cnpj_dv"],
+                            "row": rec,
+                            "timestamp": datetime.utcnow().isoformat(),
+                        },
+                    )
+            except Exception:
+                pass
         fk_info = validate_chunk(config_name, chunk, conn)
         if isinstance(fk_info, dict) and fk_info:
             for label, mask in fk_info.items():
