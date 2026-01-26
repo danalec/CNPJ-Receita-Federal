@@ -1,11 +1,19 @@
-# CNPJ Dados Abertos — Pipeline de `ETL` para PostgreSQL
+# CNPJ Dados Abertos — Pipeline de ETL para PostgreSQL
 
-Ferramenta de `ETL` (Extract, Transform, Load) de alto desempenho para baixar, tratar e carregar os dados públicos de CNPJ
+Ferramenta de ETL (Extract, Transform, Load) de alto desempenho para baixar, tratar e carregar os dados públicos de CNPJ
 [(disponibilizados pela Receita Federal do Brasil)](https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/).
 
 - Foco em **performance** com `COPY FROM STDIN`, tabelas `UNLOGGED` e processamento em _chunks_ via Pandas.
 - Pipeline **modular**: se alguma etapa falhar, corrija e retome diretamente daquele ponto.
-- Nota de integridade: eventualmente a Receita publica versões com lacunas (ex.: `2025-11` sem o código de país `150`). Se houver FKs ausentes, corrija no banco e execute `constraints.sql` para aplicar/reaplicar as restrições.
+- **Integridade**: Tratamento automático de lacunas (ex.: FKs ausentes).
+
+## Integridade dos Dados e Inconsistências na Origem
+
+É comum que a base de dados da Receita Federal apresente inconsistências de integridade referencial (ex: um sócio referenciado que não consta na tabela de sócios).
+
+O Pipeline trata esses casos automaticamente: todas as constraints e chaves estrangeiras são validadas após a inserção para que seja aplicada as constraints e não de erro no processo. Quando um registro pai não é encontrado, o sistema insere um dado fictício (dummy) identificado como "NÃO CONSTA NA ORIGEM". Portanto, não se preocupe: os dados já estão higienizados e inseridos, você não terá erro algum.
+
+Para aplicar as restrições formalmente no banco de dados **CASO SEJA NECESSÁRIO**, execute o arquivo `constraints.sql`. Basta corrigir o dado pontual e executá-lo novamente, sem a necessidade de reiniciar todo o processo de inserção.
 
 ```bash
 python -m src --force
@@ -44,6 +52,31 @@ Sem `make`, utilize `tasks.ps1` na raiz:
 ./tasks.ps1 pipeline
 ./tasks.ps1 step load
 ```
+
+## Detalhes das Etapas
+
+### Download dos dados
+**Download dos arquivos** em multi-thread, máximo de 4 para evitar abusos de conexões simultâneas.
+**Módulo responsável: `downloader.py`**
+
+### Descompactação
+Descompacta arquivos baixados que por padrão são divididos em vários arquivos `.zip`. Extrai agrupando o resultado em uma única pasta, normalmente os dados vem com um nome prefixado e as versões, `empresas01.zip`, `empresas02.zip` etc...
+**Módulo responsável: `extract_files.py`**
+
+### Consolidação dos arquivos `CSVs`
+Agrupa os `CSVs` descompactados em único arquivo, único por categoria, removendo a necessidade de lidar com múltiplos arquivos durante a carga.
+**Módulo responsável: `consolidate_csv.py`**
+
+### Carga para o Banco de dados
+Utiliza o comando `COPY` do PostgreSQL (via driver `psycopg`) para inserção em massa.
+
+- Cria tabelas como `UNLOGGED` para acelerar a escrita inicial.
+- Realiza a limpeza de dados (conversão de datas, formatação de arrays para `CNAEs`, sanitização de decimais etc...)
+- Validação das constraints para que não haja erros de integridade.
+- Aplicação de Chaves Primárias, Estrangeiras e Índices **após** a carga para maximizar a velocidade.
+- Schema Otimizado Separação clara entre SQL de definição (`DDL`) e código Python.
+
+**Módulo responsável: `database_loader.py`**
 
 ## Pré-requisitos
 
@@ -137,7 +170,7 @@ Para conteúdo aprofundado (fluxo, exemplos por módulo, troubleshooting, diagra
 ## Troubleshooting
 
 - CSV com BOM/linhas malformadas: use `--no-csv-filter` para desabilitar limpeza.
-- FKs ausentes em versões da Receita: corrija as lacunas e aplique/reaplique restrições com `src/constraints.sql` via `--step constraints`.      
+- FKs ausentes em versões da Receita: corrija as lacunas e aplique/reaplique restrições com `src/constraints.sql` via `--step constraints`.
 - Erros de conexão com banco: valide `DATABASE_URL` ou variáveis `POSTGRES_*`.
 
 ## Contribuição
