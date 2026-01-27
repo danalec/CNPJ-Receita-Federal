@@ -3,17 +3,18 @@
 Ferramenta de ETL (Extract, Transform, Load) de alto desempenho para baixar, tratar e carregar os dados públicos de CNPJ
 [(disponibilizados pela Receita Federal do Brasil)](https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/).
 
-- Foco em **performance** com `COPY FROM STDIN`, tabelas `UNLOGGED` e processamento em _chunks_ via Pandas.
-- Pipeline **modular**: se alguma etapa falhar, corrija e retome diretamente daquele ponto.
+- **Alta Performance**: Download **assíncrono** (asyncio/curl_cffi) e carga via `COPY FROM STDIN`.
+- **Stealth & Resiliência**: Emulação de TLS de navegador (Chrome/Edge), rotação de proxies, retry inteligente e circuit breaker.
 - **Integridade**: Tratamento automático de lacunas (ex.: FKs ausentes).
+- **Modular**: Execute etapas isoladas ou o pipeline completo.
 
 ## Integridade dos Dados e Inconsistências na Origem
 
 É comum que a base de dados da Receita Federal apresente inconsistências de integridade referencial (ex: um sócio referenciado que não consta na tabela de sócios).
 
-O Pipeline trata esses casos automaticamente: todas as constraints e chaves estrangeiras são validadas após a inserção para que seja aplicada as constraints e não de erro no processo. Quando um registro pai não é encontrado, o sistema insere um dado fictício (dummy) identificado como "NÃO CONSTA NA ORIGEM". Portanto, não se preocupe: os dados já estão higienizados e inseridos, você não terá erro algum.
+O Pipeline trata esses casos automaticamente: todas as constraints e chaves estrangeiras são validadas após a inserção para que seja aplicada as constraints e não de erro no processo. Quando um registro pai não é encontrado, o sistema insere um dado fictício (dummy) identificado como "NÃO CONSTA NA ORIGEM".
 
-Para aplicar as restrições formalmente no banco de dados **CASO SEJA NECESSÁRIO**, execute o arquivo `constraints.sql`. Basta corrigir o dado pontual e executá-lo novamente, sem a necessidade de reiniciar todo o processo de inserção.
+O Pipeline **aplica as restrições automaticamente** ao final da carga. A execução manual do arquivo `constraints.sql` (ou via `--step constraints`) é necessária **apenas** se você precisar reaplicá-las (ex: após correções manuais de dados) ou se a etapa automática tiver sido pulada/falhado.
 
 ```bash
 python -m src --force
@@ -29,17 +30,7 @@ python -m src.database_loader
 
 1. Instale as dependências e configure o `.env`.
 2. Execute `python -m src.check_update` para verificar novas versões.
-3. Rode `python -m src` para orquestrar todo o pipeline, ou execute módulos individualmente:
-   - `python -m src.downloader`
-   - `python -m src.extract_files`
-   - `python -m src.consolidate_csv`
-   - `python -m src.database_loader`
-
-CLI do orquestrador (`main.py`):
-
-- `--force`: ignora histórico e roda todas as etapas
-- `--step {check,download,extract,consolidate,load,constraints}`: executa apenas a etapa informada
-- `--no-csv-filter`: desabilita filtros de CSV (linhas malformadas e vazias)
+3. Rode `python -m src` para orquestrar todo o pipeline, ou execute módulos individualmente.
 
 ### Uso no Windows (PowerShell)
 Sem `make`, utilize `tasks.ps1` na raiz:
@@ -55,103 +46,76 @@ Sem `make`, utilize `tasks.ps1` na raiz:
 
 ## Detalhes das Etapas
 
-### Download dos dados
-**Download dos arquivos** em multi-thread, máximo de 4 para evitar abusos de conexões simultâneas.
+### Download dos dados (Stealth/Async)
+Utiliza **`curl_cffi`** e **`asyncio`** para downloads de alta velocidade que simulam um navegador real (TLS Fingerprinting), evitando bloqueios de WAF. Suporta HTTP/2, rotação de IPs (Proxies) e retomada automática.
 **Módulo responsável: `downloader.py`**
 
 ### Descompactação
-Descompacta arquivos baixados que por padrão são divididos em vários arquivos `.zip`. Extrai agrupando o resultado em uma única pasta, normalmente os dados vem com um nome prefixado e as versões, `empresas01.zip`, `empresas02.zip` etc...
+Descompacta arquivos baixados, agrupando volumes (`empresas01.zip`, `empresas02.zip`) em uma estrutura consolidada.
 **Módulo responsável: `extract_files.py`**
 
 ### Consolidação dos arquivos `CSVs`
-Agrupa os `CSVs` descompactados em único arquivo, único por categoria, removendo a necessidade de lidar com múltiplos arquivos durante a carga.
+Agrupa os `CSVs` descompactados em arquivos únicos por categoria, facilitando a carga.
 **Módulo responsável: `consolidate_csv.py`**
 
 ### Carga para o Banco de dados
-Utiliza o comando `COPY` do PostgreSQL (via driver `psycopg`) para inserção em massa.
-
-- Cria tabelas como `UNLOGGED` para acelerar a escrita inicial.
-- Realiza a limpeza de dados (conversão de datas, formatação de arrays para `CNAEs`, sanitização de decimais etc...)
-- Validação das constraints para que não haja erros de integridade.
-- Aplicação de Chaves Primárias, Estrangeiras e Índices **após** a carga para maximizar a velocidade.
-- Schema Otimizado Separação clara entre SQL de definição (`DDL`) e código Python.
-
+Utiliza o comando `COPY` do PostgreSQL para inserção em massa.
+- Tabelas `UNLOGGED` para velocidade.
+- Limpeza e sanitização de dados.
+- Validação e aplicação de constraints/índices ao final.
 **Módulo responsável: `database_loader.py`**
 
 ## Pré-requisitos
 
 - `Python` 3.10+ e `Poetry`
-- `PostgreSQL` 14+ acessível e com permissões de criação de tabelas/índices
-- Espaço em disco para arquivos compactados e CSVs (dezenas de GB)
+- `PostgreSQL` 14+
+- Espaço em disco (recomendado 100GB+)
 
 ## Configuração (`.env`)
 
-Variáveis suportadas (aliases aceitos: `POSTGRES_*` e `PG*`). Opcional: `DATABASE_URL`.
-Suportados também: `LOG_LEVEL`, `LOG_BACKUP_COUNT`, `CSV_FILTER`, `FILE_ENCODING`, `CHUNK_SIZE`.
+Exemplo de configuração:
 
 ```ini
+# Banco de Dados
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 POSTGRES_DB=cnpj
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=senha
 
-CSV_FILTER=true
-LOG_LEVEL=INFO
-LOG_BACKUP_COUNT=7
-
-# Alternativa única
-# DATABASE_URL=postgresql://user:pass@host:5432/db
-```
-
-## Download dos dados (multithread)
-
-- Módulo responsável: `src/downloader.py`
-- Configure a data alvo e paralelismo no `.env`:
-
-```ini
+# Download & Stealth
 TARGET_DATE=2025-11
-MAX_WORKERS=4
+MAX_WORKERS=4                 # Concorrência base
 DOWNLOAD_CHUNK_SIZE=8192
 VERIFY_ZIP_INTEGRITY=true
+ENABLE_HTTP2=true
+STEALTH_MODE=true
+IMPERSONATE=chrome110         # chrome, chrome110, edge99, safari15_3
+# PROXIES=["http://user:pass@host:port", ...] 
+
+# Geral
+CSV_FILTER=true
+LOG_LEVEL=INFO
 ```
 
-- Execute apenas a etapa de download pelo orquestrador:
+## Download dos dados
+
+Execute apenas a etapa de download:
 
 ```bash
 python -m src --step download
-```
-
-- Ou execute diretamente o módulo de download:
-
-```bash
+# Ou
 python -m src.downloader
 ```
 
-- Detalhes adicionais em [docs/download.md](docs/download.md).
-
-## Exemplos por etapa
-Exemplos detalhados estão em [docs/](docs/index.md).
-
-## Fluxo de dados
-A visão completa do fluxo está em [docs/](docs/index.md).
-
-## Instalação e configuração
-```bash
-poetry install
-```
-
-- Configure o `.env` conforme seção acima.
-
-## Notas de performance
-Detalhes e recomendações estão em `docs/`. Destaques:
-- Carga via `COPY FROM STDIN`.
-- Tabelas `UNLOGGED` durante ingestão, com índices aplicados ao final.
-- Processamento em _chunks_ via Pandas para reduzir memória.
-- Arrays textuais em `cnae_fiscal_secundaria` no lugar de N:N para velocidade.
+O downloader gerencia automaticamente:
+- **Rate Limiting**: Para não saturar a rede.
+- **Circuit Breaker**: Pausa temporária em caso de erros consecutivos.
+- **Resume**: Continua de onde parou usando headers `Range`.
 
 ## Testes
-Execute:
+
+Execute os testes automatizados:
 
 ```bash
 pytest -q
@@ -159,24 +123,7 @@ pytest -q
 
 ## Documentação
 
-Para conteúdo aprofundado (fluxo, exemplos por módulo, troubleshooting, diagrama ER), consulte [docs/](docs/index.md):
-- [Descrição dos dados](docs/descricao-dados.md)
-- [Diagrama ER](docs/diagrama_er.md)
-- [Boas práticas de índices](docs/boas-praticas-indices.md)
-- [Guia de Docker](docs/docker.md)
-- [Rotação de User-Agent (Downloader)](docs/user-agent.md)
-
-
-## Troubleshooting
-
-- CSV com BOM/linhas malformadas: use `--no-csv-filter` para desabilitar limpeza.
-- FKs ausentes em versões da Receita: corrija as lacunas e aplique/reaplique restrições com `src/constraints.sql` via `--step constraints`.
-- Erros de conexão com banco: valide `DATABASE_URL` ou variáveis `POSTGRES_*`.
-
-## Contribuição
-
-- Abra issues para relatar inconsistências ou propor melhorias.
-- Envie PRs com otimizações de performance, confiabilidade e manutenção.
+Para conteúdo aprofundado, consulte [docs/](docs/index.md).
 
 ## Licença
 

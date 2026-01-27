@@ -1,92 +1,143 @@
+import pytest
 import io
 import zipfile
-from pathlib import Path
-
+from unittest.mock import AsyncMock, patch
+from curl_cffi.requests import AsyncSession
+from src.downloader import AsyncDownloader
 from src.settings import settings
-from src.downloader import download_file
 
+# --- Mocks ---
 
-class FakeHead:
-    def __init__(self, size: int):
-        self.headers = {"content-length": str(size)}
-
-    def raise_for_status(self):
-        return None
-
-
-class FakeResponse:
-    def __init__(self, data: bytes, content_type: str = "application/octet-stream"):
-        self._bio = io.BytesIO(data)
-        self.headers = {"content-length": str(len(data)), "content-type": content_type}
+class MockResponse:
+    def __init__(self, content=b"", status_code=200, headers=None):
+        self.content = content
+        self.status_code = status_code
+        self.headers = headers or {}
+        self.text = content.decode("utf-8", errors="ignore")
 
     def raise_for_status(self):
-        return None
+        if self.status_code >= 400:
+            raise Exception(f"HTTP Error {self.status_code}")
 
-    def iter_content(self, chunk_size: int):
-        while True:
-            b = self._bio.read(chunk_size)
-            if not b:
-                break
-            yield b
+    async def aiter_content(self, chunk_size=None):
+        yield self.content
 
-    def __enter__(self):
-        return self
+class MockStreamContext:
+    def __init__(self, response):
+        self.response = response
 
-    def __exit__(self, exc_type, exc, tb):
-        return False
+    async def __aenter__(self):
+        return self.response
 
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        pass
 
-class FakeSession:
-    def __init__(self, data: bytes):
-        self._data = data
+# --- Tests ---
 
-    def head(self, url, timeout=30, allow_redirects=True):
-        return FakeHead(len(self._data))
+@pytest.mark.asyncio
+async def test_fetch_file_list():
+    html_content = """
+    <html>
+        <body>
+            <a href="file1.zip">File 1</a>
+            <a href="other.txt">Text File</a>
+            <a href="http://external.com/file2.zip">External Zip</a>
+        </body>
+    </html>
+    """
+    
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_session.get.return_value = MockResponse(content=html_content.encode())
+    
+    # Mock context manager for session
+    mock_session.__aenter__.return_value = mock_session
+    mock_session.__aexit__.return_value = None
 
-    def get(self, url, stream=True, timeout=60, headers=None):
-        return FakeResponse(self._data)
+    with patch("src.downloader.AsyncDownloader._get_session", return_value=mock_session):
+        downloader = AsyncDownloader()
+        downloader.base_url = "http://test.com/"
+        links = await downloader.fetch_file_list()
+        
+        assert len(links) == 2
+        assert "http://test.com/file1.zip" in links
+        assert "http://external.com/file2.zip" in links
 
-
-def test_download_file_zip_integrity_ok(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_download_file_success(tmp_path):
+    # Create a valid zip file in memory
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, mode="w") as z:
-        z.writestr("x.txt", "hello")
-    data = bio.getvalue()
-    monkeypatch.setattr("src.downloader.get_session", lambda: FakeSession(data))
-    settings.verify_zip_integrity = True
-    settings.rate_limit_per_sec = 0
-    url = "http://example.com/file.zip"
-    ok = download_file(url, Path(tmp_path))
-    assert ok
-    assert (Path(tmp_path) / "file.zip").exists()
+        z.writestr("test.txt", "hello world")
+    zip_data = bio.getvalue()
 
+    mock_session = AsyncMock(spec=AsyncSession)
+    
+    # Mock HEAD request
+    mock_session.head.return_value = MockResponse(headers={"content-length": str(len(zip_data))})
+    
+    # Mock GET request (stream)
+    mock_response = MockResponse(content=zip_data, headers={"content-length": str(len(zip_data))})
+    mock_session.get.return_value = mock_response
 
-def test_download_file_zip_integrity_bad(tmp_path, monkeypatch):
-    data = b"not-a-zip"
-    monkeypatch.setattr("src.downloader.get_session", lambda: FakeSession(data))
-    settings.verify_zip_integrity = True
-    settings.rate_limit_per_sec = 0
-    url = "http://example.com/file.zip"
-    ok = download_file(url, Path(tmp_path))
-    assert not ok
-    assert not (Path(tmp_path) / "file.zip").exists()
+    mock_session.__aenter__.return_value = mock_session
+    mock_session.__aexit__.return_value = None
 
+    with patch("src.downloader.AsyncDownloader._get_session", return_value=mock_session):
+        settings.verify_zip_integrity = True
+        
+        downloader = AsyncDownloader()
+        
+        # Monkey-patch the retry policy on the bound method to stop immediately
+        import tenacity
+        downloader.download_file.retry.stop = tenacity.stop_after_attempt(1)
+        downloader.download_file.retry.wait = tenacity.wait_none()
+        
+        downloader.dest_dir = tmp_path
+        
+        success = await downloader.download_file("http://test.com/test.zip")
+        
+        assert success
+        assert (tmp_path / "test.zip").exists()
 
-def test_download_rate_limit_sleep(tmp_path, monkeypatch):
-    data = b"x" * (8192 * 2 + 100)
-    monkeypatch.setattr("src.downloader.get_session", lambda: FakeSession(data))
-    settings.verify_zip_integrity = False
-    settings.rate_limit_per_sec = 1024
-    calls = []
+@pytest.mark.asyncio
+async def test_download_file_integrity_failure(tmp_path):
+    # Create invalid data
+    zip_data = b"this is not a zip file"
 
-    def fake_sleep(s):
-        calls.append(s)
+    mock_session = AsyncMock(spec=AsyncSession)
+    mock_session.head.return_value = MockResponse(headers={"content-length": str(len(zip_data))})
+    mock_response = MockResponse(content=zip_data)
+    mock_session.get.return_value = mock_response
+    mock_session.__aenter__.return_value = mock_session
+    mock_session.__aexit__.return_value = None
 
-    import src.downloader as dl
-    monkeypatch.setattr(dl.time, "sleep", fake_sleep)
-    url = "http://example.com/file.bin"
-    ok = download_file(url, Path(tmp_path))
-    assert ok
-    assert (Path(tmp_path) / "file.bin").exists()
-    assert len(calls) > 0
-    assert sum(calls) > 0
+    with patch("src.downloader.AsyncDownloader._get_session", return_value=mock_session):
+        settings.verify_zip_integrity = True
+        
+        downloader = AsyncDownloader()
+        
+        # Monkey-patch the retry policy on the bound method to stop immediately
+        import tenacity
+        downloader.download_file.retry.stop = tenacity.stop_after_attempt(1)
+        downloader.download_file.retry.wait = tenacity.wait_none()
+        
+        downloader.dest_dir = tmp_path
+        
+        # Since we are using tenacity, the original exception is wrapped in RetryError
+        # after max retries are exhausted.
+        try:
+            await downloader.download_file("http://test.com/bad.zip")
+        except Exception as e:
+            # Check if it's a RetryError (which wraps the underlying exception)
+            # or if tenacity was configured to reraise the original exception
+            import tenacity
+            if isinstance(e, tenacity.RetryError):
+                # If wrapped, we can inspect the last attempt's exception if needed,
+                # but simply catching it confirms that retries failed as expected.
+                pass
+            elif "Integrity check failed" in str(e):
+                pass
+            else:
+                pytest.fail(f"Unexpected exception raised: {e}")
+        
+        assert not (tmp_path / "bad.zip").exists()

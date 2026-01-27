@@ -46,6 +46,22 @@ class Settings(BaseSettings):
     rate_limit_per_sec: int = 0
     verify_zip_integrity: bool = True
 
+    # Configurações Stealth/Async
+    enable_http2: bool = True
+    stealth_mode: bool = True
+    max_concurrent_requests: Optional[int] = None  # Se None, usa max_workers * 2
+    retry_max_attempts: int = 10
+    retry_backoff_factor: float = 0.5
+    retry_jitter: bool = True
+    
+    # Proxy Configuration
+    proxies: Optional[list[str]] = None
+    proxy_rotation_strategy: Literal["round_robin", "random"] = "round_robin"
+    
+    # Browser Impersonation
+    impersonate: Literal["chrome", "chrome110", "edge99", "safari15_3"] = "chrome110"
+
+
     """
     O script por padrão desativa o log de transação (WAL) 
     Otização que torna as tabelas unlogged.
