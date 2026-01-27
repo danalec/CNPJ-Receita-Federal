@@ -3,10 +3,10 @@ import logging
 import random
 import time
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List
 import zipfile
 
-from curl_cffi.requests import AsyncSession, BrowserType
+from curl_cffi.requests import AsyncSession
 import aiofiles
 from bs4 import BeautifulSoup
 from tenacity import (
