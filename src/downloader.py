@@ -177,6 +177,7 @@ class AsyncDownloader:
                             # Validate integrity if needed before skipping
                             if settings.verify_zip_integrity and filename.lower().endswith(".zip"):
                                 loop = asyncio.get_running_loop()
+                                # Use lighter check first if possible, but keeping verify_zip_sync for safety
                                 is_valid = await loop.run_in_executor(None, verify_zip_sync, dest_path)
                                 if is_valid:
                                     logger.info(f"Skipping {filename} (already downloaded and valid)")

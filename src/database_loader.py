@@ -700,35 +700,41 @@ def execute_sql_file(conn, filename):
                     cursor.execute("SET app.allow_drop = %s", ('1' if getattr(settings, 'allow_drop', False) else '0',))
             except Exception:
                 pass
-        needs_autocommit = ("CONCURRENTLY" in sql_content) or (filename == "constraints.sql")
+        needs_autocommit = ("CONCURRENTLY" in sql_content)
+        
+        # Set configuration for constraints backfill if needed
+        if filename == "constraints.sql":
+             with conn.cursor() as cursor:
+                enable_bf = '1' if getattr(settings, 'enable_constraints_backfill', True) else '0'
+                # If we are in autocommit mode, this SET might only apply to the current session/transaction?
+                # In autocommit, SET persists for the session.
+                # In transaction, it persists for the transaction.
+                cursor.execute(f"SET app.enable_backfill = '{enable_bf}'")
+
         if needs_autocommit:
             old_autocommit = conn.autocommit
             try:
                 conn.autocommit = True
-                statements = []
-                if filename == "constraints.sql":
-                    with conn.cursor() as cursor:
-                        cursor.execute("SET app.enable_backfill = %s", ('1' if getattr(settings, 'enable_constraints_backfill', True) else '0',))
-                    import re
-                    pattern = re.compile(r"DO\s+\$\$[\s\S]*?\$\$;", re.IGNORECASE)
-                    blocks = [m.group(0) for m in pattern.finditer(sql_content)]
-                    for g in blocks:
-                        statements.append(g)
-                    remainder = pattern.sub("", sql_content)
-                    statements.extend([s.strip() for s in remainder.split(";") if s.strip()])
-                else:
-                    statements = [s.strip() for s in sql_content.split(";") if s.strip()]
+                # For CONCURRENTLY or VACUUM, we must execute statements individually
+                # Simple split by ';' (this is still fragile for complex SQL but sufficient for maintenance scripts)
+                statements = [s.strip() for s in sql_content.split(";") if s.strip()]
+                
                 with conn.cursor() as cursor:
                     cursor.execute("SET search_path TO rfb;")
+                
                 for stmt in statements:
                     with conn.cursor() as cursor:
                         cursor.execute(stmt)
-                logger.info(f"Sucesso ao executar {filename}")
+                logger.info(f"Sucesso ao executar {filename} (Autocommit Mode)")
             finally:
                 conn.autocommit = old_autocommit
         else:
+            # Standard execution (Transactional)
+            # psycopg2 handles multiple statements in one execute() call
             with conn.cursor() as cursor:
-                cursor.execute("SET search_path TO rfb;" + "\n" + sql_content)
+                # We do not split by ';' here, letting Postgres handle the parsing.
+                # This supports DO $$ blocks and complex SQL correctly.
+                cursor.execute("SET search_path TO rfb;\n" + sql_content)
             conn.commit()
             logger.info(f"Sucesso ao executar {filename}")
     except Exception as e:
@@ -993,16 +999,18 @@ FK_RULES: Dict[str, list[tuple[str, str | None, str | None]]] = {
         ("municipio_codigo","municipios","codigo"),
         ("cnae_fiscal_principal_codigo","cnaes","codigo"),
         ("uf", None, None),
+        # Removed "empresas" from python-side validation to save memory
     ],
     "socios": [
         ("pais_codigo","paises","codigo"),
         ("qualificacao_socio_codigo","qualificacoes_socios","codigo"),
         ("qualificacao_representante_legal_codigo","qualificacoes_socios","codigo"),
+        # Removed "empresas" from python-side validation to save memory
     ],
 }
 
 DOMAINS_REQUIRED: Dict[str, list[str]] = {
     "empresas": ["naturezas_juridicas","qualificacoes_socios"],
-    "estabelecimentos": ["paises","municipios","cnaes","empresas"],
-    "socios": ["paises","qualificacoes_socios","empresas"],
+    "estabelecimentos": ["paises","municipios","cnaes"], # Removed "empresas"
+    "socios": ["paises","qualificacoes_socios"], # Removed "empresas"
 }
