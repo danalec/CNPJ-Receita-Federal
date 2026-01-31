@@ -227,7 +227,7 @@ class AsyncDownloader:
                         position=pbar_pos
                     )
                     
-                    async with aiofiles.open(dest_path, mode) as f:
+                    async with aiofiles.open(dest_path, mode) as f:  # type: ignore
                         async for chunk in response.aiter_content(chunk_size=settings.download_chunk_size):
                             if not chunk:
                                 break

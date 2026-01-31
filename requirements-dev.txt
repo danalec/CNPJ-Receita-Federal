@@ -6,3 +6,4 @@ mypy
 types-requests
 types-urllib3
 pytest-asyncio
+types-aiofiles

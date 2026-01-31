@@ -47,7 +47,7 @@ async def test_fetch_file_list():
     """
     
     mock_session = AsyncMock(spec=AsyncSession)
-    mock_session.get.return_value = MockResponse(content=html_content.encode())
+    mock_session.get = AsyncMock(return_value=MockResponse(content=html_content.encode()))
     
     # Mock context manager for session
     mock_session.__aenter__.return_value = mock_session
@@ -73,11 +73,11 @@ async def test_download_file_success(tmp_path):
     mock_session = AsyncMock(spec=AsyncSession)
     
     # Mock HEAD request
-    mock_session.head.return_value = MockResponse(headers={"content-length": str(len(zip_data))})
+    mock_session.head = AsyncMock(return_value=MockResponse(headers={"content-length": str(len(zip_data))}))
     
     # Mock GET request (stream)
     mock_response = MockResponse(content=zip_data, headers={"content-length": str(len(zip_data))})
-    mock_session.get.return_value = mock_response
+    mock_session.get = AsyncMock(return_value=mock_response)
 
     mock_session.__aenter__.return_value = mock_session
     mock_session.__aexit__.return_value = None
@@ -105,9 +105,9 @@ async def test_download_file_integrity_failure(tmp_path):
     zip_data = b"this is not a zip file"
 
     mock_session = AsyncMock(spec=AsyncSession)
-    mock_session.head.return_value = MockResponse(headers={"content-length": str(len(zip_data))})
+    mock_session.head = AsyncMock(return_value=MockResponse(headers={"content-length": str(len(zip_data))}))
     mock_response = MockResponse(content=zip_data)
-    mock_session.get.return_value = mock_response
+    mock_session.get = AsyncMock(return_value=mock_response)
     mock_session.__aenter__.return_value = mock_session
     mock_session.__aexit__.return_value = None
 
