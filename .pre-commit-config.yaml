@@ -9,7 +9,7 @@ repos:
 
       - id: compileall
         name: compileall
-        entry: poetry run python -m compileall -q src main.py
+        entry: poetry run python -m compileall -q src
         language: system
         types: [python]
 

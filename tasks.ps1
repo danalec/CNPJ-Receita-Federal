@@ -133,13 +133,12 @@ switch ($Task) {
   }
   "check" {
     if (Use-Poetry) { poetry run python -m compileall -q src } else { python -m compileall -q src }
-    if (Use-Poetry) { poetry run python -m compileall -q main.py } else { python -m compileall -q main.py }
   }
   "test" {
     if (Use-Poetry) { poetry run pytest -q } else { pytest -q }
   }
   "pipeline" {
-    if (Use-Poetry) { poetry run python main.py } else { python main.py }
+    if (Use-Poetry) { poetry run python -m src } else { python -m src }
   }
   "etl" {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -213,7 +212,6 @@ switch ($Task) {
     
     Write-Section "Type/Compile Check"
     if (Use-Poetry) { poetry run python -m compileall -q src } else { python -m compileall -q src }
-    if (Use-Poetry) { poetry run python -m compileall -q main.py } else { python -m compileall -q main.py }
     
     # Try mypy but don't fail verify if it crashes (known issue in some envs)
     try {

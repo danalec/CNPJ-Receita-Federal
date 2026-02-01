@@ -700,7 +700,7 @@ def execute_sql_file(conn, filename):
                     cursor.execute("SET app.allow_drop = %s", ('1' if getattr(settings, 'allow_drop', False) else '0',))
             except Exception:
                 pass
-        needs_autocommit = ("CONCURRENTLY" in sql_content)
+        needs_autocommit = ("CONCURRENTLY" in sql_content) or (filename == "constraints.sql")
         
         # Set configuration for constraints backfill if needed
         if filename == "constraints.sql":
