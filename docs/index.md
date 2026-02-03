@@ -16,7 +16,7 @@
   - `python -m src.consolidate_csv`
   - `python -m src.database_loader`
 
-### CLI do orquestrador (`main.py`)
+### CLI do orquestrador (`src`)
 - `--force`: ignora histórico e roda todas as etapas
 - `--step {check,download,extract,consolidate,load,constraints}`: executa somente a etapa informada
 - `--no-csv-filter`: desabilita limpeza de linhas malformadas e vazias
