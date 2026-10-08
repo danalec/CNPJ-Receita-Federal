@@ -170,8 +170,12 @@ def test_constraints_sql_is_replayable():
 
     # Every constraint is declared as "table|name|definition" inside the guard
     # array, and the loop only adds it when pg_constraint has no such conname.
-    assert "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname)" in sql_text
-    assert sql_text.count("IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname)") == 2
+    guard = "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname AND connamespace"
+    assert sql_text.count(guard) == 2, "both constraint lists must be existence-guarded"
+    assert sql_text.count("connamespace = current_schema()::regnamespace") == 2, (
+        "the guard must be scoped to rfb: pg_constraint.conname is unique per "
+        "namespace, so a same-named constraint elsewhere must not skip ours"
+    )
 
     names = [
         line.split("|")[1].strip().strip("',")
@@ -220,12 +224,23 @@ def test_constraints_sql_only_references_existing_tables():
     unknown = bound - tables
     assert not unknown, f"constraints.sql references unknown tables: {unknown}"
 
-    catalog = {"pg_constraint", "pg_indexes", "pg_class", "pg_inherits", "pg_extension"}
-    for match in re.finditer(r"(?:ON|FROM|INTO|UPDATE)\s+(?!rfb)(\w+)", sql_text):
+    catalog = {"pg_constraint", "pg_indexes", "pg_class", "pg_inherits", "pg_extension",
+               "pg_partitioned_table"}
+    # Scan executable SQL only: prose in comments mentions words that look like
+    # relations and would produce false failures.
+    code = "\n".join(
+        line for line in sql_text.splitlines() if not line.lstrip().startswith("--")
+    )
+    for match in re.finditer(r"(?:ON|FROM|INTO|UPDATE)\s+(?!rfb)(\w+)", code):
         name = match.group(1)
         if name.isupper():
             continue  # token from a generated expression, not a relation
         assert name in tables | catalog, f"unknown relation {name!r} in constraints.sql"
+
+    # Reference targets of the foreign keys.
+    for match in re.finditer(r"REFERENCES\s+(\w+)", code):
+        target = match.group(1)
+        assert target in tables, f"foreign key references unknown table {target!r}"
 
 
 def test_execute_sql_file_restores_autocommit_on_failure(monkeypatch):

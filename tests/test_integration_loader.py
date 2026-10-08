@@ -127,4 +127,79 @@ def test_loader_and_constraints_with_sample_domain_data(tmp_path: Path):
     )
     assert cur.fetchone()[0] == 1
 
+    cur.execute(
+        "SELECT count(*) FROM pg_constraint WHERE connamespace='rfb'::regnamespace"
+    )
+    assert cur.fetchone()[0] == 18, "expected 8 primary keys and 10 foreign keys"
+
+    # The three trigram indexes are the reason pg_trgm is created at all; none of
+    # them were asserted, so a regression that dropped every index still passed.
+    for iname in [
+        "idx_empresas_razao_social",
+        "idx_estabelecimentos_nome_fantasia",
+        "idx_socios_nome",
+    ]:
+        cur.execute(
+            "SELECT 1 FROM pg_indexes WHERE schemaname='rfb' AND indexname=%s",
+            (iname,),
+        )
+        assert cur.fetchone() is not None, f"missing trigram index {iname}"
+
+    cur.execute("SELECT count(*) FROM pg_indexes WHERE schemaname='rfb'")
+    assert cur.fetchone()[0] >= 10
+
+    cur.execute("SELECT 1 FROM pg_extension WHERE extname='pg_trgm'")
+    assert cur.fetchone() is not None, "pg_trgm was not created"
+
     conn.close()
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _should_run_integration(), reason="Integration tests disabled")
+def test_constraints_work_when_pg_trgm_lives_in_public(tmp_path: Path):
+    """The trigram opclass is only reachable if public is on the search_path.
+
+    CREATE EXTENSION without a SCHEMA clause is database-wide: when pg_trgm is
+    already installed in public -- the default on RDS, Cloud SQL, Azure and
+    Supabase -- CREATE EXTENSION IF NOT EXISTS is a silent no-op, and an opclass
+    lookup only walks the search_path. The stock postgres image used by CI has
+    no preinstalled pg_trgm, so this case is invisible there.
+    """
+    settings.project_root = tmp_path
+    settings.allow_drop = True
+    settings.set_logged_after_copy = True
+    settings.skip_constraints = False
+    settings.create_dirs()
+
+    import psycopg2
+
+    conn = psycopg2.connect(settings.database_uri)
+    conn.autocommit = True
+    cur = conn.cursor()
+
+    try:
+        cur.execute("DROP SCHEMA IF EXISTS rfb CASCADE")
+        # Make the precondition explicit rather than depending on what another
+        # test happened to leave behind.
+        cur.execute("DROP EXTENSION IF EXISTS pg_trgm")
+        cur.execute("CREATE EXTENSION pg_trgm")
+        cur.execute(
+            "SELECT n.nspname FROM pg_extension e JOIN pg_namespace n"
+            " ON n.oid = e.extnamespace WHERE e.extname='pg_trgm'"
+        )
+        assert cur.fetchone()[0] == "public", "expected pg_trgm to already be in public"
+
+        src = Path(__file__).resolve().parents[1] / "src"
+        cur.execute((src / "schema.sql").read_text(encoding="utf-8"))
+        cur.execute("SET app.enable_backfill = '1';")
+        cur.execute(
+            "SET search_path TO rfb;\n"
+            + (src / "constraints.sql").read_text(encoding="utf-8")
+        )
+
+        cur.execute("SELECT count(*) FROM pg_indexes WHERE schemaname='rfb'")
+        assert cur.fetchone()[0] >= 10, "constraints.sql did not create the indexes"
+    finally:
+        cur.execute("DROP SCHEMA IF EXISTS rfb CASCADE")
+        cur.close()
+        conn.close()

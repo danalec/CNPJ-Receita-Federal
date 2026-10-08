@@ -2,7 +2,12 @@
 -- ============================================================================
 -- CONSTRAINTS & INDEXES
 -- ============================================================================
-SET search_path TO rfb;
+-- public must stay on the search_path. CREATE EXTENSION without a SCHEMA clause
+-- installs into the first entry, and pg_trgm may already exist database-wide in
+-- public (the default on RDS, Cloud SQL, Azure and Supabase), in which case
+-- CREATE EXTENSION IF NOT EXISTS is a silent no-op and gin_trgm_ops is only
+-- reachable if public is searched.
+SET search_path TO rfb, public;
 
 -- Required by the gin_trgm_ops indexes below (idx_empresas_razao_social,
 -- idx_estabelecimentos_nome_fantasia, idx_socios_nome). Without this the
@@ -37,7 +42,17 @@ BEGIN
         tbl   := split_part(spec, '|', 1);
         cname := split_part(spec, '|', 2);
         cdef  := split_part(spec, '|', 3);
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname) THEN
+        -- A primary key on a partitioned table must contain every partition key
+        -- column, so the establishments PK gains `uf` when that table is
+        -- partitioned by it. Otherwise Postgres rejects it with "unique
+        -- constraint on partitioned table must include all partitioning
+        -- columns", which aborts the whole batch.
+        IF tbl = 'estabelecimentos'
+           AND EXISTS (SELECT 1 FROM pg_partitioned_table WHERE partrelid = to_regclass(tbl))
+           AND cdef = 'PRIMARY KEY (cnpj_basico, cnpj_ordem, cnpj_dv)' THEN
+            cdef := 'PRIMARY KEY (cnpj_basico, cnpj_ordem, cnpj_dv, uf)';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname AND connamespace = current_schema()::regnamespace) THEN
             EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s', tbl, cname, cdef);
             RAISE NOTICE 'Criada constraint %', cname;
         END IF;
@@ -161,7 +176,7 @@ BEGIN
         tbl   := split_part(spec, '|', 1);
         cname := split_part(spec, '|', 2);
         cdef  := split_part(spec, '|', 3);
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname) THEN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname AND connamespace = current_schema()::regnamespace) THEN
             EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s', tbl, cname, cdef);
             RAISE NOTICE 'Criada constraint %', cname;
         END IF;

@@ -40,7 +40,7 @@ Sem `make`, utilize `./tasks.ps1` na raiz:
 ## Pré-requisitos
 
 - `Python` 3.10+
-- `PostgreSQL` 14+ com permissões para criar tabelas/índices e a extensão `pg_trgm` (o papel precisa ser superusuário, ou a extensão já estar instalada)
+- `PostgreSQL` 14+ com permissões para criar tabelas/índices e a extensão `pg_trgm` (o papel precisa ser superusuário, ou a extensão já estar instalada). O `search_path` inclui `public` de propósito: se `pg_trgm` já existir lá — padrão em RDS, Cloud SQL, Azure e Supabase — o opclass `gin_trgm_ops` só é encontrado se `public` for pesquisado.
 - Espaço em disco para arquivos compactados e CSVs (dezenas de GB)
 
 ## Configuração (`.env`)

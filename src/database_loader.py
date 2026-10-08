@@ -866,7 +866,9 @@ def create_partitioned_estabelecimentos(conn):
             parent=sql.Identifier("estabelecimentos"),
         ).as_string(conn)
     )
-    full_sql = ddl_parent + "\n".join(parts)
+    # Each partition statement needs its own terminator; without it they run
+    # together and the batch fails with "syntax error at or near CREATE".
+    full_sql = ddl_parent + ";\n".join(parts) + ";"
     with conn.cursor() as cursor:
         cursor.execute(full_sql)
     conn.commit()
