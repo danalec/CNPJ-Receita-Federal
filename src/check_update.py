@@ -101,13 +101,16 @@ def check_updates(skip_clean: bool = False) -> Optional[str]:
     logger.info(f"Última versão disponível: {latest_remote}")
     logger.info(f"Última versão processada: {last_processed}")
 
+# Adopt the newest folder found even when it is the one already processed.
+    # settings.download_url is derived from target_date, so leaving it empty
+    # makes the downloader request an empty URL. --force reaches the pipeline
+    # regardless of this function's return value.
+    settings.target_date = latest_remote
+
     if latest_remote == last_processed:
         return None
 
     logger.info(f"Nova versão encontrada: {latest_remote}. Iniciando atualização.")
-
-    # O settings.download_url se atualizará sozinho graças ao @computed_field
-    settings.target_date = latest_remote
 
     if not skip_clean:
         logger.info("Removendo arquivos antigos! Caso existam")

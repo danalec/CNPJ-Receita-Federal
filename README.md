@@ -10,7 +10,8 @@ em um PostgreSQL.
 ## Requisitos
 
 - Python 3.10+
-- PostgreSQL 14+ (o `constraints.sql` cria a extensão `pg_trgm`)
+- PostgreSQL 14+ (o `constraints.sql` cria a extensão `pg_trgm`; o papel precisa ser superusuário
+  ou tê-la pré-instalada)
 - Espaço em disco para os ZIPs e os CSVs extraídos (dezenas de GB)
 
 > As tabelas ficam `UNLOGGED` **também depois** da carga, a menos que você defina

@@ -6,7 +6,7 @@ from enum import Enum
 
 from . import extract_files, downloader, consolidate_csv, database_loader, check_update
 from .settings import setup_logging, settings
-from .state import state
+from .state import start_run, state
 
 
 class PipelineStep(Enum):
@@ -51,6 +51,15 @@ def main():
             if not args.force:
                  return
         
+        # The resume ledger must be keyed on the folder being processed now, not
+        # on the one recorded by the previous run. The module-level state object
+        # was built at import from last_version_processed.txt, so without this a
+        # resume would skip stages belonging to the previous month and then
+        # reload that month's data under the new month's name.
+        if date and date != state.date:
+            state.date = date
+            start_run(date)
+
         # Dry Run Check
         if args.dry_run:
             logger.info(f"Dry-run ativo. Etapas que seriam executadas (Resume={args.resume}):")
@@ -119,9 +128,16 @@ def main():
              database_loader.run_queries_in_dir(settings.queries_dir)
 
         # Only now is the dataset complete on disk and in Postgres, so this is the
-        # point where the processed version becomes the baseline for the next run.
-        if date:
+        # point where the processed version becomes the baseline for the next
+        # run. A run restricted with --only/--exclude left most tables unloaded,
+        # so stamping it would make check_updates skip that month forever.
+        partial_load = bool(args.only or args.exclude)
+        if date and not partial_load:
             check_update.update_local_version(date)
+        elif date:
+            logger.warning(
+                f"Carga parcial (--only/--exclude): {date} não foi marcado como processado."
+            )
 
         elapsed = time.time() - start_time
         logger.info(f"🏁 Pipeline Finalizado com Sucesso em {elapsed:.2f}s")

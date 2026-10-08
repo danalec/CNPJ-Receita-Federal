@@ -12,42 +12,41 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 -- ----------------------------------------------------------------------------
 -- 1. Primary Keys
 -- ----------------------------------------------------------------------------
--- Every constraint and index below is dropped first so this file can be applied
--- more than once: run_loader applies it as the final step of `load`, and
--- `--step constraints` / `tasks.ps1 etl` may apply it again right afterwards.
-ALTER TABLE paises DROP CONSTRAINT IF EXISTS paises_pkey;
-ALTER TABLE municipios DROP CONSTRAINT IF EXISTS municipios_pkey;
-ALTER TABLE qualificacoes_socios DROP CONSTRAINT IF EXISTS qualificacoes_socios_pkey;
-ALTER TABLE naturezas_juridicas DROP CONSTRAINT IF EXISTS naturezas_juridicas_pkey;
-ALTER TABLE cnaes DROP CONSTRAINT IF EXISTS cnaes_pkey;
-ALTER TABLE empresas DROP CONSTRAINT IF EXISTS empresas_pkey;
-ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS estabelecimentos_pkey;
-ALTER TABLE simples DROP CONSTRAINT IF EXISTS simples_pkey;
+-- Applied through a guard on pg_constraint rather than DROP + ADD. This file is
+-- applied more than once per pipeline (run_loader applies it at the end of
+-- `load`, then `--step constraints` applies it again), and rebuilding a primary
+-- key over a 100M-row table twice is expensive. It is also crash-safe: a
+-- DROP/ADD sequence that fails midway leaves the table with no primary key.
+DO $$
+DECLARE
+    spec   text;
+    tbl    text;
+    cname  text;
+    cdef   text;
+BEGIN
+    FOREACH spec IN ARRAY ARRAY[
+        'paises|paises_pkey|PRIMARY KEY (codigo)',
+        'municipios|municipios_pkey|PRIMARY KEY (codigo)',
+        'qualificacoes_socios|qualificacoes_socios_pkey|PRIMARY KEY (codigo)',
+        'naturezas_juridicas|naturezas_juridicas_pkey|PRIMARY KEY (codigo)',
+        'cnaes|cnaes_pkey|PRIMARY KEY (codigo)',
+        'empresas|empresas_pkey|PRIMARY KEY (cnpj_basico)',
+        'estabelecimentos|estabelecimentos_pkey|PRIMARY KEY (cnpj_basico, cnpj_ordem, cnpj_dv)',
+        'simples|simples_pkey|PRIMARY KEY (cnpj_basico)'
+    ] LOOP
+        tbl   := split_part(spec, '|', 1);
+        cname := split_part(spec, '|', 2);
+        cdef  := split_part(spec, '|', 3);
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname) THEN
+            EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s', tbl, cname, cdef);
+            RAISE NOTICE 'Criada constraint %', cname;
+        END IF;
+    END LOOP;
+END
+$$;
 
-ALTER TABLE paises ADD CONSTRAINT paises_pkey PRIMARY KEY (codigo);
-ALTER TABLE municipios ADD CONSTRAINT municipios_pkey PRIMARY KEY (codigo);
-ALTER TABLE qualificacoes_socios ADD CONSTRAINT qualificacoes_socios_pkey PRIMARY KEY (codigo);
-ALTER TABLE naturezas_juridicas ADD CONSTRAINT naturezas_juridicas_pkey PRIMARY KEY (codigo);
-ALTER TABLE cnaes ADD CONSTRAINT cnaes_pkey PRIMARY KEY (codigo);
-
--- Empresas PK
-ALTER TABLE empresas ADD CONSTRAINT empresas_pkey PRIMARY KEY (cnpj_basico);
-
--- Estabelecimentos PK (Composite)
--- Note: Using a composite PK might be heavy.
--- Usually queries are by CNPJ (basico+ordem+dv).
-ALTER TABLE estabelecimentos ADD CONSTRAINT estabelecimentos_pkey PRIMARY KEY (cnpj_basico, cnpj_ordem, cnpj_dv);
-
--- Socios PK (Composite)
--- We assume identifiers are unique per company?
--- The documentation doesn't specify a clear PK for socios, but (cnpj_basico, identificador_socio) seems reasonable?
--- Or (cnpj_basico, nome_socio_ou_razao_social)?
--- Let's stick to indexes for now if PK is uncertain, but typically (cnpj_basico, identificador_socio) is a candidate.
--- However, let's just index it for now to avoid issues if data is dirty.
+-- Socios: no confident primary key, so index only. Queries go by cnpj_basico.
 CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico ON socios (cnpj_basico);
-
--- Simples PK
-ALTER TABLE simples ADD CONSTRAINT simples_pkey PRIMARY KEY (cnpj_basico);
 
 -- ----------------------------------------------------------------------------
 -- 2. Indexes for Foreign Keys and Performance
@@ -135,59 +134,37 @@ END
 $$;
 
 -- ----------------------------------------------------------------------------
+-- ----------------------------------------------------------------------------
 -- 4. Foreign Keys
 -- ----------------------------------------------------------------------------
-
-ALTER TABLE empresas DROP CONSTRAINT IF EXISTS fk_empresas_natureza;
-ALTER TABLE empresas DROP CONSTRAINT IF EXISTS fk_empresas_qualificacao;
-ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS fk_estabelecimentos_empresa;
-ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS fk_estabelecimentos_pais;
-ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS fk_estabelecimentos_municipio;
-ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS fk_estabelecimentos_cnae;
-ALTER TABLE socios DROP CONSTRAINT IF EXISTS fk_socios_empresa;
-ALTER TABLE socios DROP CONSTRAINT IF EXISTS fk_socios_pais;
-ALTER TABLE socios DROP CONSTRAINT IF EXISTS fk_socios_qualificacao;
-ALTER TABLE simples DROP CONSTRAINT IF EXISTS fk_simples_empresa;
-
-ALTER TABLE empresas 
-    ADD CONSTRAINT fk_empresas_natureza 
-    FOREIGN KEY (natureza_juridica_codigo) REFERENCES naturezas_juridicas (codigo);
-
--- Note: qualificacao_responsavel sometimes points to values not in qualificacoes_socios?
--- Assuming it does.
-ALTER TABLE empresas 
-    ADD CONSTRAINT fk_empresas_qualificacao 
-    FOREIGN KEY (qualificacao_responsavel) REFERENCES qualificacoes_socios (codigo);
-
-ALTER TABLE estabelecimentos 
-    ADD CONSTRAINT fk_estabelecimentos_empresa 
-    FOREIGN KEY (cnpj_basico) REFERENCES empresas (cnpj_basico);
-
-ALTER TABLE estabelecimentos 
-    ADD CONSTRAINT fk_estabelecimentos_pais 
-    FOREIGN KEY (pais_codigo) REFERENCES paises (codigo);
-
-ALTER TABLE estabelecimentos 
-    ADD CONSTRAINT fk_estabelecimentos_municipio 
-    FOREIGN KEY (municipio_codigo) REFERENCES municipios (codigo);
-
-ALTER TABLE estabelecimentos 
-    ADD CONSTRAINT fk_estabelecimentos_cnae 
-    FOREIGN KEY (cnae_fiscal_principal_codigo) REFERENCES cnaes (codigo);
-
-ALTER TABLE socios 
-    ADD CONSTRAINT fk_socios_empresa 
-    FOREIGN KEY (cnpj_basico) REFERENCES empresas (cnpj_basico);
-
-ALTER TABLE socios 
-    ADD CONSTRAINT fk_socios_pais 
-    FOREIGN KEY (pais_codigo) REFERENCES paises (codigo);
-
-ALTER TABLE socios 
-    ADD CONSTRAINT fk_socios_qualificacao 
-    FOREIGN KEY (qualificacao_socio_codigo) REFERENCES qualificacoes_socios (codigo);
-
-ALTER TABLE simples 
-    ADD CONSTRAINT fk_simples_empresa 
-    FOREIGN KEY (cnpj_basico) REFERENCES empresas (cnpj_basico);
-
+-- Same pg_constraint guard as the primary keys: adding a foreign key revalidates
+-- every row on both sides, which is not something to do twice per run.
+DO $$
+DECLARE
+    spec   text;
+    tbl    text;
+    cname  text;
+    cdef   text;
+BEGIN
+    FOREACH spec IN ARRAY ARRAY[
+        'empresas|fk_empresas_natureza|FOREIGN KEY (natureza_juridica_codigo) REFERENCES naturezas_juridicas (codigo)',
+        'empresas|fk_empresas_qualificacao|FOREIGN KEY (qualificacao_responsavel) REFERENCES qualificacoes_socios (codigo)',
+        'estabelecimentos|fk_estabelecimentos_empresa|FOREIGN KEY (cnpj_basico) REFERENCES empresas (cnpj_basico)',
+        'estabelecimentos|fk_estabelecimentos_pais|FOREIGN KEY (pais_codigo) REFERENCES paises (codigo)',
+        'estabelecimentos|fk_estabelecimentos_municipio|FOREIGN KEY (municipio_codigo) REFERENCES municipios (codigo)',
+        'estabelecimentos|fk_estabelecimentos_cnae|FOREIGN KEY (cnae_fiscal_principal_codigo) REFERENCES cnaes (codigo)',
+        'socios|fk_socios_empresa|FOREIGN KEY (cnpj_basico) REFERENCES empresas (cnpj_basico)',
+        'socios|fk_socios_pais|FOREIGN KEY (pais_codigo) REFERENCES paises (codigo)',
+        'socios|fk_socios_qualificacao|FOREIGN KEY (qualificacao_socio_codigo) REFERENCES qualificacoes_socios (codigo)',
+        'simples|fk_simples_empresa|FOREIGN KEY (cnpj_basico) REFERENCES empresas (cnpj_basico)'
+    ] LOOP
+        tbl   := split_part(spec, '|', 1);
+        cname := split_part(spec, '|', 2);
+        cdef  := split_part(spec, '|', 3);
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname) THEN
+            EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s', tbl, cname, cdef);
+            RAISE NOTICE 'Criada constraint %', cname;
+        END IF;
+    END LOOP;
+END
+$$;

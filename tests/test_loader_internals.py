@@ -158,35 +158,39 @@ def test_execute_sql_file_keeps_dollar_quoted_block_intact():
 def test_constraints_sql_is_replayable():
     """run_loader applies constraints.sql, then `--step constraints` applies it again.
 
-    Bare ADD CONSTRAINT / CREATE INDEX made the second pass abort with
-    "already exists", which broke the documented `tasks.ps1 etl` flow once the
-    loader started propagating errors instead of swallowing them.
+    Bare ADD CONSTRAINT / CREATE INDEX made the second pass abort with "already
+    exists". Constraints are now added behind a pg_constraint existence check
+    rather than DROP + ADD, because rebuilding a primary key over a 100M-row
+    table twice per run is expensive and a DROP/ADD that fails midway leaves
+    the table with no primary key at all.
     """
     from src import database_loader as _dl
 
     sql_text = (Path(_dl.__file__).parent / "constraints.sql").read_text(encoding="utf-8")
 
-    adds = [
-        line
-        for line in sql_text.splitlines()
-        if "ADD CONSTRAINT" in line.upper()
-    ]
-    assert adds, "expected constraints.sql to define constraints"
+    # Every constraint is declared as "table|name|definition" inside the guard
+    # array, and the loop only adds it when pg_constraint has no such conname.
+    assert "IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname)" in sql_text
+    assert sql_text.count("IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = cname)") == 2
 
-    for line in adds:
-        name = line.split()[line.upper().split().index("CONSTRAINT") + 1]
-        assert (
-            f"DROP CONSTRAINT IF EXISTS {name}" in sql_text
-        ), f"{name} is added without a preceding DROP CONSTRAINT IF EXISTS"
+    names = [
+        line.split("|")[1].strip().strip("',")
+        for line in sql_text.splitlines()
+        if line.strip().startswith("'") and "|" in line
+    ]
+    assert len(names) >= 15, f"expected the PK and FK lists to be guarded, found {len(names)}"
+    assert "empresas_pkey" in names
+    assert "fk_simples_empresa" in names
+
+    assert "DROP CONSTRAINT" not in sql_text, "constraints.sql must not drop before adding"
 
     creates = [
-        line
-        for line in sql_text.splitlines()
+        line for line in sql_text.splitlines()
         if line.upper().lstrip().startswith("CREATE INDEX")
     ]
     assert creates, "expected constraints.sql to define indexes"
     for line in creates:
-        assert "IF NOT EXISTS" in line.upper(), f"index is created without IF NOT EXISTS: {line.strip()}"
+        assert "IF NOT EXISTS" in line.upper(), f"index created without IF NOT EXISTS: {line.strip()}"
 
 
 def test_execute_sql_file_restores_autocommit_on_failure(monkeypatch):

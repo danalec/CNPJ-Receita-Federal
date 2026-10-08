@@ -842,7 +842,9 @@ def run_loader(only=None, exclude=None):
         conn = psycopg2.connect(settings.database_uri)
     except Exception as e:
         logger.error(f"Erro ao conectar no banco: {e}")
-        return
+        # Propagate: a silent return made the orchestrator mark the load as
+        # completed after hours of downloading, with nothing in the database.
+        raise
 
     try:
         clear_domain_cache()
@@ -956,7 +958,7 @@ def run_constraints():
         conn = psycopg2.connect(settings.database_uri)
     except Exception as e:
         logger.error(f"Erro ao conectar no banco: {e}")
-        return
+        raise
     try:
         execute_sql_file(conn, "constraints.sql")
         with conn.cursor() as cursor:

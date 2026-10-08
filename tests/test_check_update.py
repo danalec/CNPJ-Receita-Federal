@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 import src.check_update as cu
 from src.settings import settings
 
@@ -60,3 +62,62 @@ def test_check_updates_updates_target_date(tmp_path, monkeypatch):
     d = cu.check_updates(skip_clean=True)
     assert d == "2025-11"
     assert settings.target_date == "2025-11"
+
+
+def test_target_date_is_adopted_even_when_already_processed(tmp_path, monkeypatch):
+    """download_url is derived from target_date, so it must never be left empty.
+
+    Persisting the processed version made check_updates return early on the next
+    run, before assigning target_date, and --force reaches the pipeline anyway:
+    the downloader then requested an empty URL.
+    """
+    settings.project_root = Path(tmp_path)
+    settings.create_dirs()
+
+    monkeypatch.setattr(cu, "get_latest_remote_date", lambda: "2025-11")
+    monkeypatch.setattr(cu, "get_local_version", lambda: "2025-11")
+    monkeypatch.setattr(cu, "clean_data_dirs", lambda: pytest.fail("must not clean"))
+
+    assert cu.check_updates() is None  # nothing new, so nothing to clean
+    assert settings.target_date == "2025-11"
+    assert settings.download_url.endswith("2025-11/")
+
+
+def test_resume_ledger_follows_the_month_being_processed(tmp_path, monkeypatch):
+    """--resume must key on the folder being processed, not the previous one.
+
+    The module-level state object is built at import from
+    last_version_processed.txt. Without re-pointing it, resuming in a new month
+    would skip the previous month's completed stages and reload its data under
+    the new month's name.
+    """
+    import sys
+
+    import src.__main__ as m
+    import src.state as st
+
+    settings.project_root = Path(tmp_path)
+    settings.create_dirs()
+    (settings.state_file).write_text("2025-11")
+    st.PipelineState("2025-11").update("download", "completed")
+
+    monkeypatch.setattr(cu, "get_latest_remote_date", lambda: "2025-12")
+    monkeypatch.setattr(cu, "get_local_version", lambda: "2025-11")
+    monkeypatch.setattr(cu, "clean_data_dirs", lambda: None)
+    monkeypatch.setattr(cu, "update_local_version", lambda v: None)
+    ran = []
+    monkeypatch.setattr("src.downloader.run_download", lambda: ran.append("download"))
+    monkeypatch.setattr("src.extract_files.run_extraction", lambda: ran.append("extract"))
+    monkeypatch.setattr("src.consolidate_csv.run_consolidation", lambda: ran.append("consolidate"))
+    monkeypatch.setattr("src.database_loader.run_loader", lambda: ran.append("load"))
+    monkeypatch.setattr("src.database_loader.run_constraints", lambda: ran.append("constraints"))
+    monkeypatch.setattr(sys, "argv", ["prog", "--resume"])
+    monkeypatch.setattr(m, "state", st.PipelineState("2025-11"))
+
+    m.main()
+
+    ledger = st._read()
+    assert "2025-12" in ledger, "resume ledger was not re-keyed on the new month"
+    assert ran == ["download", "extract", "consolidate", "load", "constraints"], (
+        f"the new month's stages were skipped, ran={ran}"
+    )
