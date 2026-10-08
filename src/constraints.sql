@@ -59,7 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_empresas_razao_social ON empresas USING gin (raza
 
 -- Estabelecimentos
 CREATE INDEX IF NOT EXISTS idx_estabelecimentos_cnae_main ON estabelecimentos (cnae_fiscal_principal_codigo);
-CREATE INDEX IF NOT EXISTS idx_estabelecimentos_municipio ON establishments (municipio_codigo);
+CREATE INDEX IF NOT EXISTS idx_estabelecimentos_municipio ON estabelecimentos (municipio_codigo);
 CREATE INDEX IF NOT EXISTS idx_estabelecimentos_uf ON estabelecimentos (uf);
 CREATE INDEX IF NOT EXISTS idx_estabelecimentos_nome_fantasia ON estabelecimentos USING gin (nome_fantasia gin_trgm_ops);
 

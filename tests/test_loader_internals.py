@@ -193,6 +193,41 @@ def test_constraints_sql_is_replayable():
         assert "IF NOT EXISTS" in line.upper(), f"index created without IF NOT EXISTS: {line.strip()}"
 
 
+def test_constraints_sql_only_references_existing_tables():
+    """A mistyped table name is invisible until Postgres runs the file.
+
+    `ON establishments` for `estabelecimentos` passed every static check and
+    only blew up in the integration run, after the whole load.
+    """
+    import re
+
+    from src import database_loader as _dl
+
+    sql_text = (Path(_dl.__file__).parent / "constraints.sql").read_text(encoding="utf-8")
+
+    schema_text = (Path(_dl.__file__).parent / "schema.sql").read_text(encoding="utf-8")
+    tables = set(re.findall(r"CREATE\s+(?:UNLOGGED\s+)?TABLE\s+rfb\.(\w+)", schema_text))
+    assert len(tables) >= 8, f"could not read the table list from schema.sql: {tables}"
+
+    # Table names the constraints file binds to, from the guard arrays.
+    bound = {
+        line.split("|")[0].strip().strip("',")
+        for line in sql_text.splitlines()
+        if line.strip().startswith("'") and "|" in line
+    }
+    assert bound, "no guarded table names found in constraints.sql"
+
+    unknown = bound - tables
+    assert not unknown, f"constraints.sql references unknown tables: {unknown}"
+
+    catalog = {"pg_constraint", "pg_indexes", "pg_class", "pg_inherits", "pg_extension"}
+    for match in re.finditer(r"(?:ON|FROM|INTO|UPDATE)\s+(?!rfb)(\w+)", sql_text):
+        name = match.group(1)
+        if name.isupper():
+            continue  # token from a generated expression, not a relation
+        assert name in tables | catalog, f"unknown relation {name!r} in constraints.sql"
+
+
 def test_execute_sql_file_restores_autocommit_on_failure(monkeypatch):
     """A raising SQL file must not leave the connection stuck in autocommit."""
     def boom(self, stmt, params=None):
