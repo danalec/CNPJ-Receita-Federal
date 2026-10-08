@@ -46,12 +46,9 @@ class Settings(BaseSettings):
     verify_zip_integrity: bool = True
 
     # Configurações Stealth/Async
-    enable_http2: bool = True
-    stealth_mode: bool = True
     max_concurrent_requests: Optional[int] = None  # Se None, usa max_workers * 2
     retry_max_attempts: int = 10
     retry_backoff_factor: float = 0.5
-    retry_jitter: bool = True
     
     # Proxy Configuration
     proxies: Optional[list[str]] = None
@@ -119,10 +116,6 @@ class Settings(BaseSettings):
     skip_invalid_estabelecimentos_cnpj: bool = False
     cep_correct_uf_only_if_null: bool = True
     municipio_name_map_path: Optional[Path] = None
-
-    user_agent_rotation: Literal["random", "sequential"] = "random"
-    user_agents: list[str] = []
-
     
     @computed_field
     def download_url(self) -> str:

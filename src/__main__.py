@@ -42,8 +42,10 @@ def main():
         if args.max_workers is not None:
             settings.max_workers = args.max_workers
 
-        # Check updates first
-        date = check_update.check_updates(skip_clean=args.resume)
+        # Check updates first. A dry run must not touch anything, and
+        # check_updates deletes the downloaded and extracted trees when it finds
+        # a newer release, so it has to run with skip_clean.
+        date = check_update.check_updates(skip_clean=args.resume or args.dry_run)
         if date is None and not args.resume:
             logger.info("Dados já estão atualizados ou não foi possível verificar.")
             if not args.force:

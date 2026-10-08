@@ -121,4 +121,7 @@ def run_check_step() -> Optional[str]:
 
 
 if __name__ == "__main__":
+    from .settings import setup_logging
+
+    setup_logging()
     check_updates()

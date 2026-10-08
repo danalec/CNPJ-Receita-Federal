@@ -142,4 +142,7 @@ def run_extraction():
 
 
 if __name__ == "__main__":
+    from .settings import setup_logging
+
+    setup_logging()
     run_extraction()

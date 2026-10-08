@@ -96,7 +96,7 @@ Veja [`.env.example`](../.env.example) e a lista completa em `src/settings.py`.
 ## Conteúdos Relacionados
 - Boas práticas de índices: [boas-praticas-indices.md](boas-praticas-indices.md)
 - Guia de Docker: [docker.md](docker.md)
-- Rotação de User-Agent (Downloader): [user-agent.md](user-agent.md)
+- Emulação de navegador (Downloader): [user-agent.md](user-agent.md)
 - Download dos dados (multithread): [download.md](download.md)
 - AUTO-REPAIR: Normalização e Telemetria: [auto-repair.md](auto-repair.md)
 - Visão geral e início rápido: [README.md](../README.md)

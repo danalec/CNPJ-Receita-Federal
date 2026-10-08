@@ -62,5 +62,5 @@ Duas formas de executar:
 ## Boas práticas
 - Evite exagerar em `MAX_WORKERS` para reduzir bloqueios.
 - Utilize pausa/taxa (`RATE_LIMIT_PER_SEC`) se notar rejeições do servidor.
-- Consulte o guia de [Rotação de User-Agent](user-agent.md) para melhorar a resiliência de requisições.
+- Consulte o guia de [emulação de navegador](user-agent.md) para melhorar a resiliência de requisições.
 

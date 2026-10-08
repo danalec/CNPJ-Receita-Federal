@@ -1,39 +1,46 @@
 [[Voltar ao README]](../README.md) • [[Índice da documentação]](index.md)
 
-# Rotação de User-Agent (Downloader)
+# Emulação de navegador (Downloader)
 
-Este guia descreve práticas para definir e rotacionar o cabeçalho `User-Agent` durante o download dos arquivos da Receita, reduzindo bloqueios e melhorando compatibilidade.
+## O que o projeto faz
 
-## Boas práticas
-- Defina sempre um `User-Agent` explícito nas requisições HTTP.
-- Rotacione entre uma lista de `User-Agent`s realistas (navegadores modernos) para reduzir padrões repetitivos.
-- Respeite limites do servidor (intervalos entre requisições, backoff exponencial em erros 429/503).
-- Mantenha logs para diagnosticar rejeições e ajustes futuros.
+O downloader não gerencia uma lista de `User-Agent`. Ele usa
+[`curl_cffi`](https://curl-cffi.readthedocs.io/) com `impersonate`, que reproduz a impressão
+digital TLS (JA3/JA4) **e** os cabeçalhos HTTP — incluindo `User-Agent` — de um navegador real. É
+por isso que a requisição passa por WAFs que bloqueiam `requests`/`urllib` comuns.
 
-## Exemplo (Python Requests)
-```python
-import random
-import time
-import requests
+A escolha é feita pela variável `IMPERSONATE`:
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
-]
+| Valor            | Navegador imitado |
+|------------------|-------------------|
+| `chrome`         | Chrome atual      |
+| `chrome110`      | Chrome 110 (padrão)|
+| `edge99`         | Edge 99           |
+| `safari15_3`     | Safari 15.3       |
 
-def fetch(url: str, timeout: int = 60) -> requests.Response:
-    ua = random.choice(USER_AGENTS)
-    headers = {"User-Agent": ua}
-    resp = requests.get(url, headers=headers, timeout=timeout)
-    if resp.status_code in (429, 503):
-        time.sleep(2)
-    resp.raise_for_status()
-    return resp
+```ini
+IMPERSONATE=chrome110
 ```
 
-## Dicas adicionais
-- Combine rotação de `User-Agent` com revezamento de proxies apenas se necessário e conforme políticas de uso.
-- Evite `User-Agent`s genéricos ou obsoletos; mantenha a lista atualizada.
-- Para downloads massivos, insira pausas e verifique cabeçalhos `Retry-After` quando disponíveis.
+Esse valor é repassado em `src/downloader.py::_get_session`. Perfil fixo é intencional: alternar
+aleatoriamente entre perfis produz uma impressão digital inconsistente ao longo da mesma sessão e
+torna a evasão de WAF menos eficaz, não mais.
 
+## Resistência a bloqueios
+
+O que realmente reduz bloqueios, em ordem de efeito:
+
+1. `IMPERSONATE` — impressão digital TLS compatível com navegador.
+2. `PROXIES` + `PROXY_ROTATION_STRATEGY` — distribuir as requisições por IPs diferentes.
+3. `RATE_LIMIT_PER_SEC` — limite global em **bytes por segundo**. `0` desativa.
+4. `RETRY_MAX_ATTEMPTS` / `RETRY_BACKOFF_FACTOR` — backoff exponencial entre tentativas.
+5. O circuit breaker em `AsyncDownloader`, que pausa o download após 5 erros consecutivos em vez de
+   insistir contra um servidor que está recusando.
+
+## Se você realmente quiser trocar o User-Agent
+
+Não é uma opção suportada aqui: `AsyncSession` de `curl_cffi` aceita um header explícito, mas
+sobrepor o `User-Agent` sem mudar a impressão digital TLS produz uma requisição que não corresponde
+a nenhum navegador real, o que costuma piorar a detecção em vez de melhorar.
+
+Para ajustar o comportamento, prefira mudar `IMPERSONATE`.

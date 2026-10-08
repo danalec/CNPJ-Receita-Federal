@@ -5,13 +5,17 @@ em um PostgreSQL.
 
 - **Rápido** — carga via `COPY FROM STDIN`, tabelas `UNLOGGED` durante a ingestão, processamento em chunks.
 - **Resiliente** — download assíncrono com `curl_cffi` (emulação de TLS), proxies, retry e circuit breaker.
-- **Auditável** — registros rejeitados vão para JSONL em `logs/quarantine/`, com telemetria por chunk.
+- **Auditável** — divergências ficam registradas em `logs/quarantine/` e `logs/telemetry/`.
 
 ## Requisitos
 
 - Python 3.10+
 - PostgreSQL 14+ (o `constraints.sql` cria a extensão `pg_trgm`)
-- ~100 GB de disco
+- Espaço em disco para os ZIPs e os CSVs extraídos (dezenas de GB)
+
+> As tabelas ficam `UNLOGGED` **também depois** da carga, a menos que você defina
+> `SET_LOGGED_AFTER_COPY=true`. O PostgreSQL trunca tabelas `UNLOGGED` em crash ou restart, então
+> nesse cenário o banco é reconstruível a partir dos CSVs, mas não é o seu backup.
 
 ## Começando
 
@@ -32,14 +36,20 @@ python -m src [opções]
   --resume                 pula etapas já concluídas
   --dry-run                mostra o que seria executado
   --step {check,download,extract,consolidate,load,constraints}
-  --only / --exclude       restringem as tabelas do passo load
-  --run-queries            executa as queries de queries/ após a carga
-  --max-workers N          sobrescreve MAX_WORKERS
+  --only / --exclude       restringem o passo load por nome de config
+                           (ex.: empresas, nao pelo nome da tabela)
+  --run-queries            executa as queries de queries/ após o pipeline
+  --max-workers N          sobrescreve MAX_WORKERS (a concorrência real é
+                           MAX_CONCURRENT_REQUESTS, ou 2× MAX_WORKERS)
   --rate-limit-per-sec N   sobrescreve RATE_LIMIT_PER_SEC
-  --skip-zip-verify        pulsa a verificação de integridade dos ZIPs
+  --skip-zip-verify        pula a verificação de integridade dos ZIPs
 ```
 
+`--dry-run` e `--run-queries` só valem no pipeline completo: com `--step` eles são ignorados.
+
 Etapas também rodam isoladas: `python -m src.downloader`, `python -m src.database_loader`, etc.
+O `downloader` precisa de `TARGET_DATE` preenchido (rode `python -m src --step check` antes);
+ele não descobre a data sozinho.
 
 No Windows, `tasks.ps1` embrulha os comandos comuns:
 
@@ -59,12 +69,21 @@ No Windows, `tasks.ps1` embrulha os comandos comuns:
 | `load` | Valida, aplica quality gates e carrega via `COPY` |
 | `constraints` | PKs, FKs, índices e backfill de registros ausentes |
 
-A base da Receita tem lacunas referenciais. O pipeline trata isso em duas frentes:
-`constraints.sql` insere registros pai ausentes como `NAO CONSTA NA ORIGEM` antes de criar as FKs, e
-o passo `load` coloca em quarentena as linhas com FK inválida em `logs/quarantine/`.
+A base da Receita tem lacunas referenciais, e o comportamento depende de `STRICT_FK_VALIDATION`:
 
-Se um chunk ultrapassar os limiares de qualidade (`ENABLE_QUALITY_GATES`), ele é registrado em
-`logs/telemetry/` e não é carregado.
+- `true` (padrão): um único valor de FK inválido **aborta o `load` inteiro** com `ValueError`.
+- `false`: o valor vira `NULL`, a linha é registrada em `logs/quarantine/<data>/` com
+  `reason: "fk_violation"` e **ainda é carregada**.
+
+`constraints.sql` cria as FKs depois da carga e, antes disso, insere os registros pai ausentes
+como `NAO CONSTA NA ORIGEM` (`ENABLE_CONSTRAINTS_BACKFILL`). Ele cobre `paises`, `municipios`,
+`naturezas_juridicas` e `cnaes` — **não** cobre `qualificacoes_socios`, que precisa estar
+carregada.
+
+Quality gates descartam um chunk inteiro quando a proporção de nulos novos ou de valores alterados
+passa dos limiares; o descarte vira um registro agregado em `logs/telemetry/<data>/`. Vale saber
+que o gate só é avaliado em chunks com pelo menos `GATE_MIN_ROWS` linhas, e que o critério de
+"valores alterados" só existe em `AUTO_REPAIR_LEVEL=aggressive`.
 
 ## Configuração
 
