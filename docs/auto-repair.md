@@ -1,3 +1,5 @@
+[[Voltar ao README]](../README.md) • [[Índice da documentação]](index.md)
+
 # AUTO-REPAIR: Normalização, Enriquecimento e Telemetria
 
 Este documento descreve as configurações e o comportamento do mecanismo de AUTO-REPAIR do projeto, incluindo normalizações, validações, quarentena e telemetria.
@@ -10,7 +12,7 @@ Este documento descreve as configurações e o comportamento do mecanismo de AUT
 
 ## Validações de Consistência
 - CPF/CNPJ: valida dígitos verificadores; inválidos viram `NULL` nos campos de pessoas (`socios`) e geram telemetria.
-- CNPJ em `estabelecimentos`: linhas com CNPJ completo inválido são quarentenadas e puladas no COPY.
+- CNPJ em `estabelecimentos`: linhas com CNPJ completo inválido são sempre quarentenadas; elas só são **removidas do COPY** quando `SKIP_INVALID_ESTABELECIMENTOS_CNPJ=true` (padrão: `false`).
 
 ## Quarentena
 - Saída: `logs/quarantine/<YYYYMMDD>/<tabela>.jsonl`
@@ -48,9 +50,9 @@ Este documento descreve as configurações e o comportamento do mecanismo de AUT
   - Infere `municipio_codigo` ausente por match de `municipio_nome` (e `uf` quando presente); define `municipio_source = mun_name_map`
 
 ## Backfill de Domínios
-- `ENABLE_CONSTRAINTS_BACKFILL` (bool): controla inserts de *“NÃO INFORMADO NA ORIGEM (...)”* em `constraints.sql`
-  - `true`: habilita backfill pós-carga
-  - `false`: desativa backfill (recomendado quando domínios oficiais estão completos)
+- `ENABLE_CONSTRAINTS_BACKFILL` (bool, padrão `true`): controla se o bloco `DO $$` de `constraints.sql` insere os registros pai ausentes antes de criar as FKs. Os literais gravados são `NAO CONSTA NA ORIGEM` e, para `empresas`, `EMPRESA INEXISTENTE NA ORIGEM - GERADA AUTOMATICAMENTE`.
+  - `true`: habilita o backfill pós-carga
+  - `false`: desabilita o backfill; use apenas quando as tabelas de domínio oficiais já estiverem completas e carregadas, senão as FKs passam a falhar na criação.
 
 ## Tipos e Esquema
 - `estabelecimentos.cnae_fiscal_secundaria`: `INT[]` para type-safety

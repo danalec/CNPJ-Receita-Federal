@@ -4,9 +4,26 @@
 -- ============================================================================
 SET search_path TO rfb;
 
+-- Required by the gin_trgm_ops indexes below (idx_empresas_razao_social,
+-- idx_estabelecimentos_nome_fantasia, idx_socios_nome). Without this the
+-- CREATE INDEX statements fail with "operator class gin_trgm_ops does not exist".
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- ----------------------------------------------------------------------------
 -- 1. Primary Keys
 -- ----------------------------------------------------------------------------
+-- Every constraint and index below is dropped first so this file can be applied
+-- more than once: run_loader applies it as the final step of `load`, and
+-- `--step constraints` / `tasks.ps1 etl` may apply it again right afterwards.
+ALTER TABLE paises DROP CONSTRAINT IF EXISTS paises_pkey;
+ALTER TABLE municipios DROP CONSTRAINT IF EXISTS municipios_pkey;
+ALTER TABLE qualificacoes_socios DROP CONSTRAINT IF EXISTS qualificacoes_socios_pkey;
+ALTER TABLE naturezas_juridicas DROP CONSTRAINT IF EXISTS naturezas_juridicas_pkey;
+ALTER TABLE cnaes DROP CONSTRAINT IF EXISTS cnaes_pkey;
+ALTER TABLE empresas DROP CONSTRAINT IF EXISTS empresas_pkey;
+ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS estabelecimentos_pkey;
+ALTER TABLE simples DROP CONSTRAINT IF EXISTS simples_pkey;
+
 ALTER TABLE paises ADD CONSTRAINT paises_pkey PRIMARY KEY (codigo);
 ALTER TABLE municipios ADD CONSTRAINT municipios_pkey PRIMARY KEY (codigo);
 ALTER TABLE qualificacoes_socios ADD CONSTRAINT qualificacoes_socios_pkey PRIMARY KEY (codigo);
@@ -17,17 +34,17 @@ ALTER TABLE cnaes ADD CONSTRAINT cnaes_pkey PRIMARY KEY (codigo);
 ALTER TABLE empresas ADD CONSTRAINT empresas_pkey PRIMARY KEY (cnpj_basico);
 
 -- Estabelecimentos PK (Composite)
--- Note: Using a composite PK might be heavy. 
+-- Note: Using a composite PK might be heavy.
 -- Usually queries are by CNPJ (basico+ordem+dv).
 ALTER TABLE estabelecimentos ADD CONSTRAINT estabelecimentos_pkey PRIMARY KEY (cnpj_basico, cnpj_ordem, cnpj_dv);
 
 -- Socios PK (Composite)
--- We assume identifiers are unique per company? 
+-- We assume identifiers are unique per company?
 -- The documentation doesn't specify a clear PK for socios, but (cnpj_basico, identificador_socio) seems reasonable?
--- Or (cnpj_basico, nome_socio_ou_razao_social)? 
+-- Or (cnpj_basico, nome_socio_ou_razao_social)?
 -- Let's stick to indexes for now if PK is uncertain, but typically (cnpj_basico, identificador_socio) is a candidate.
 -- However, let's just index it for now to avoid issues if data is dirty.
-CREATE INDEX idx_socios_cnpj_basico ON socios (cnpj_basico);
+CREATE INDEX IF NOT EXISTS idx_socios_cnpj_basico ON socios (cnpj_basico);
 
 -- Simples PK
 ALTER TABLE simples ADD CONSTRAINT simples_pkey PRIMARY KEY (cnpj_basico);
@@ -37,19 +54,19 @@ ALTER TABLE simples ADD CONSTRAINT simples_pkey PRIMARY KEY (cnpj_basico);
 -- ----------------------------------------------------------------------------
 
 -- Empresas
-CREATE INDEX idx_empresas_natureza ON empresas (natureza_juridica_codigo);
-CREATE INDEX idx_empresas_qualificacao ON empresas (qualificacao_responsavel);
-CREATE INDEX idx_empresas_razao_social ON empresas USING gin (razao_social gin_trgm_ops); -- Requires pg_trgm
+CREATE INDEX IF NOT EXISTS idx_empresas_natureza ON empresas (natureza_juridica_codigo);
+CREATE INDEX IF NOT EXISTS idx_empresas_qualificacao ON empresas (qualificacao_responsavel);
+CREATE INDEX IF NOT EXISTS idx_empresas_razao_social ON empresas USING gin (razao_social gin_trgm_ops); -- Requires pg_trgm
 
 -- Estabelecimentos
-CREATE INDEX idx_estabelecimentos_cnae_main ON estabelecimentos (cnae_fiscal_principal_codigo);
-CREATE INDEX idx_estabelecimentos_municipio ON estabelecimentos (municipio_codigo);
-CREATE INDEX idx_estabelecimentos_uf ON estabelecimentos (uf);
-CREATE INDEX idx_estabelecimentos_nome_fantasia ON estabelecimentos USING gin (nome_fantasia gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_estabelecimentos_cnae_main ON estabelecimentos (cnae_fiscal_principal_codigo);
+CREATE INDEX IF NOT EXISTS idx_estabelecimentos_municipio ON establishments (municipio_codigo);
+CREATE INDEX IF NOT EXISTS idx_estabelecimentos_uf ON estabelecimentos (uf);
+CREATE INDEX IF NOT EXISTS idx_estabelecimentos_nome_fantasia ON estabelecimentos USING gin (nome_fantasia gin_trgm_ops);
 
 -- Socios
-CREATE INDEX idx_socios_cpf_cnpj ON socios (cnpj_cpf_socio);
-CREATE INDEX idx_socios_nome ON socios USING gin (nome_socio_ou_razao_social gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_socios_cpf_cnpj ON socios (cnpj_cpf_socio);
+CREATE INDEX IF NOT EXISTS idx_socios_nome ON socios USING gin (nome_socio_ou_razao_social gin_trgm_ops);
 
 -- ----------------------------------------------------------------------------
 -- 3. Backfill Logic (Optional)
@@ -120,6 +137,17 @@ $$;
 -- ----------------------------------------------------------------------------
 -- 4. Foreign Keys
 -- ----------------------------------------------------------------------------
+
+ALTER TABLE empresas DROP CONSTRAINT IF EXISTS fk_empresas_natureza;
+ALTER TABLE empresas DROP CONSTRAINT IF EXISTS fk_empresas_qualificacao;
+ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS fk_estabelecimentos_empresa;
+ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS fk_estabelecimentos_pais;
+ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS fk_estabelecimentos_municipio;
+ALTER TABLE estabelecimentos DROP CONSTRAINT IF EXISTS fk_estabelecimentos_cnae;
+ALTER TABLE socios DROP CONSTRAINT IF EXISTS fk_socios_empresa;
+ALTER TABLE socios DROP CONSTRAINT IF EXISTS fk_socios_pais;
+ALTER TABLE socios DROP CONSTRAINT IF EXISTS fk_socios_qualificacao;
+ALTER TABLE simples DROP CONSTRAINT IF EXISTS fk_simples_empresa;
 
 ALTER TABLE empresas 
     ADD CONSTRAINT fk_empresas_natureza 

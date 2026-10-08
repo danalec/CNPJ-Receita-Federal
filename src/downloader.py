@@ -51,9 +51,16 @@ class AsyncDownloader:
         self.base_url = settings.download_url
         self.dest_dir = settings.compressed_dir
         
-        # Token bucket for global rate limiting
+        # Token bucket for global rate limiting. The unit is bytes/second: tokens are
+        # spent by chunk size, so the bucket must be able to hold at least one
+        # chunk. Without that floor a chunk larger than the per-second budget
+        # could never be paid for and the download would stall forever.
         self.rate_limit = settings.rate_limit_per_sec
-        self.tokens = self.rate_limit if self.rate_limit > 0 else float('inf')
+        if self.rate_limit > 0:
+            self.bucket_capacity = float(max(self.rate_limit, settings.download_chunk_size))
+        else:
+            self.bucket_capacity = float("inf")
+        self.tokens = self.bucket_capacity
         self.last_token_update = time.monotonic()
         
         # Proxy Management
@@ -86,7 +93,7 @@ class AsyncDownloader:
         while True:
             now = time.monotonic()
             elapsed = now - self.last_token_update
-            self.tokens = min(self.rate_limit, self.tokens + elapsed * self.rate_limit)
+            self.tokens = min(self.bucket_capacity, self.tokens + elapsed * self.rate_limit)
             self.last_token_update = now
 
             if self.tokens >= chunk_size:
@@ -306,3 +313,10 @@ def run_download():
     except Exception as e:
         logger.error(f"Fatal error in download process: {e}")
         raise
+
+
+if __name__ == "__main__":
+    from .settings import setup_logging
+
+    setup_logging()
+    run_download()

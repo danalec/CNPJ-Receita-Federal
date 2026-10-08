@@ -63,6 +63,26 @@ async def test_fetch_file_list():
         assert "http://external.com/file2.zip" in links
 
 @pytest.mark.asyncio
+async def test_rate_limiter_bucket_can_always_pay_for_a_chunk():
+    """A per-second budget smaller than one chunk used to stall the download.
+
+    Tokens were capped at ``rate_limit`` but spent in ``chunk_size`` units, so
+    any limit below the chunk size could never accumulate enough tokens and
+    ``_wait_for_token`` looped forever.
+    """
+    settings.rate_limit_per_sec = 1
+    settings.download_chunk_size = 8192
+
+    downloader = AsyncDownloader()
+    assert downloader.bucket_capacity >= settings.download_chunk_size
+
+    # With a full bucket the chunk is affordable without any sleeping at all.
+    await downloader._wait_for_token(settings.download_chunk_size)
+
+    settings.rate_limit_per_sec = 0
+
+
+@pytest.mark.asyncio
 async def test_download_file_success(tmp_path):
     # Create a valid zip file in memory
     bio = io.BytesIO()

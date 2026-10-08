@@ -710,16 +710,10 @@ def execute_sql_file(conn, filename):
                     with conn.cursor() as cursor:
                         enable_bf = '1' if getattr(settings, 'enable_constraints_backfill', True) else '0'
                         cursor.execute(f"SET app.enable_backfill = '{enable_bf}'")
-                # For CONCURRENTLY or VACUUM, we must execute statements individually
-                # Simple split by ';' (this is still fragile for complex SQL but sufficient for maintenance scripts)
-                statements = [s.strip() for s in sql_content.split(";") if s.strip()]
-
+                # Executed as one multi-statement command so that dollar-quoted bodies
+                # (DO $$ ... $$) survive intact; splitting on ';' tears them apart.
                 with conn.cursor() as cursor:
-                    cursor.execute("SET search_path TO rfb;")
-                
-                for stmt in statements:
-                    with conn.cursor() as cursor:
-                        cursor.execute(stmt)
+                    cursor.execute("SET search_path TO rfb;\n" + sql_content)
                 logger.info(f"Sucesso ao executar {filename} (Autocommit Mode)")
             finally:
                 conn.autocommit = old_autocommit
@@ -930,6 +924,7 @@ def run_loader(only=None, exclude=None):
     except Exception as e:
         logger.error(f"Erro crítico durante o processo: {e}")
         conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -982,6 +977,7 @@ def run_constraints():
     except Exception as e:
         logger.error(f"Erro ao aplicar constraints: {e}")
         conn.rollback()
+        raise
     finally:
         conn.close()
 FK_RULES: Dict[str, list[tuple[str, str | None, str | None]]] = {

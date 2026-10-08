@@ -4,7 +4,6 @@ import io
 from pathlib import Path
 from typing import Literal, Optional, cast
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from enum import Enum
 from pydantic import computed_field
 
 
@@ -239,17 +238,8 @@ def setup_logging():
     )
 
 
-class PipelineStep(Enum):
-    CHECK = "check"
-    DOWNLOAD = "download"
-    EXTRACT = "extract"
-    CONSOLIDATE = "consolidate"
-    LOAD = "load"
-
-
 __all__ = [
     "Settings",
     "settings",
     "setup_logging",
-    "PipelineStep",
 ]

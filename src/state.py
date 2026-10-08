@@ -6,7 +6,7 @@ from .settings import settings
 
 logger = logging.getLogger(__name__)
 
-STAGES = ["check", "download", "extract", "consolidate", "load"]
+STAGES = ["check", "download", "extract", "consolidate", "load", "constraints"]
 
 
 def _file() -> Path:

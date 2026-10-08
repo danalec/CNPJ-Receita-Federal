@@ -29,14 +29,15 @@ Audite vulnerabilidades nas dependências Python.
 ### Local (host)
 
 ```bash
-poetry run pip-audit
+pip install pip-audit
+pip-audit -r requirements.txt
 ```
 
 ### Dentro do contêiner
 
 1. Instale a ferramenta na imagem (exemplo genérico):
    - via `pip`: adicionar `pip install pip-audit` na fase de build
-   - ou incluir no ambiente de execução conforme seu gerenciador (Poetry, pip)
+   - ou incluir no ambiente de execução conforme seu gerenciador (pip)
 
 2. Execute:
 

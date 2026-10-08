@@ -116,6 +116,11 @@ def main():
              logger.info("Executando queries customizadas...")
              database_loader.run_queries_in_dir(settings.queries_dir)
 
+        # Only now is the dataset complete on disk and in Postgres, so this is the
+        # point where the processed version becomes the baseline for the next run.
+        if date:
+            check_update.update_local_version(date)
+
         elapsed = time.time() - start_time
         logger.info(f"🏁 Pipeline Finalizado com Sucesso em {elapsed:.2f}s")
 

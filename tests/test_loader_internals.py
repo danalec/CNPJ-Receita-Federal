@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import pandas as pd
+import pytest
 import src.database_loader as dl
 from src.settings import settings
 
@@ -37,6 +38,7 @@ class FakeConn:
         self.cursors = []
         self.commits = 0
         self.rollbacks = 0
+        self.closed = False
 
     def cursor(self):
         c = FakeCursor(self)
@@ -48,6 +50,9 @@ class FakeConn:
 
     def rollback(self):
         self.rollbacks += 1
+
+    def close(self):
+        self.closed = True
 
 
 def test_critical_fields_map():
@@ -133,7 +138,94 @@ def test_execute_sql_path(tmp_path):
     assert any("SELECT 1" in e[0] for c in conn.cursors for e in c.executed)
 
 
-def test_process_and_load_file_noop_when_missing(tmp_path, monkeypatch):
+def test_execute_sql_file_keeps_dollar_quoted_block_intact():
+    """constraints.sql must reach Postgres in one piece.
+
+    Splitting the file on ';' tore the ``DO $$ ... $$`` backfill block into
+    invalid fragments, so constraints never applied.
+    """
+    conn = FakeConn()
+    dl.execute_sql_file(conn, "constraints.sql")
+
+    statements = [e[0] for c in conn.cursors for e in c.executed]
+    bodies = [s for s in statements if "DO $$" in s]
+    assert bodies, "the DO $$ block was never sent as a single statement"
+    assert sum("DO $$" in s for s in statements) == 1
+    # The block still carries its terminator, i.e. it was not cut at a ';' inside it.
+    assert "END\n$$;" in bodies[0]
+
+
+def test_constraints_sql_is_replayable():
+    """run_loader applies constraints.sql, then `--step constraints` applies it again.
+
+    Bare ADD CONSTRAINT / CREATE INDEX made the second pass abort with
+    "already exists", which broke the documented `tasks.ps1 etl` flow once the
+    loader started propagating errors instead of swallowing them.
+    """
+    from src import database_loader as _dl
+
+    sql_text = (Path(_dl.__file__).parent / "constraints.sql").read_text(encoding="utf-8")
+
+    adds = [
+        line
+        for line in sql_text.splitlines()
+        if "ADD CONSTRAINT" in line.upper()
+    ]
+    assert adds, "expected constraints.sql to define constraints"
+
+    for line in adds:
+        name = line.split()[line.upper().split().index("CONSTRAINT") + 1]
+        assert (
+            f"DROP CONSTRAINT IF EXISTS {name}" in sql_text
+        ), f"{name} is added without a preceding DROP CONSTRAINT IF EXISTS"
+
+    creates = [
+        line
+        for line in sql_text.splitlines()
+        if line.upper().lstrip().startswith("CREATE INDEX")
+    ]
+    assert creates, "expected constraints.sql to define indexes"
+    for line in creates:
+        assert "IF NOT EXISTS" in line.upper(), f"index is created without IF NOT EXISTS: {line.strip()}"
+
+
+def test_execute_sql_file_restores_autocommit_on_failure(monkeypatch):
+    """A raising SQL file must not leave the connection stuck in autocommit."""
+    def boom(self, stmt, params=None):
+        raise RuntimeError("syntax error")
+
+    monkeypatch.setattr(FakeCursor, "execute", boom)
+    conn = FakeConn()
+    conn.autocommit = False
+    with pytest.raises(RuntimeError):
+        dl.execute_sql_file(conn, "constraints.sql")
+    assert conn.autocommit is False
+
+
+def test_run_loader_propagates_failure(monkeypatch):
+    """A broken load must not be reported as a completed pipeline step."""
+    monkeypatch.setattr(dl.psycopg2, "connect", lambda *a, **k: FakeConn())
+    monkeypatch.setattr(
+        dl,
+        "execute_sql_file",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    with pytest.raises(RuntimeError):
+        dl.run_loader()
+
+
+def test_run_constraints_propagates_failure(monkeypatch):
+    monkeypatch.setattr(dl.psycopg2, "connect", lambda *a, **k: FakeConn())
+    monkeypatch.setattr(
+        dl,
+        "execute_sql_file",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    with pytest.raises(RuntimeError):
+        dl.run_constraints()
+
+
+def test_process_and_load_file_noop_when_missing(tmp_path, monkeypatch, empty_domain_tables):
     settings.project_root = Path(tmp_path)
     settings.create_dirs()
     conn = FakeConn()

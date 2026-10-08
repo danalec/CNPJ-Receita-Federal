@@ -1,133 +1,90 @@
-# CNPJ Dados Abertos — Pipeline de ETL para PostgreSQL
+# CNPJ Dados Abertos — ETL para PostgreSQL
 
-Ferramenta de ETL (Extract, Transform, Load) de alto desempenho para baixar, tratar e carregar os dados públicos de CNPJ
-[(disponibilizados pela Receita Federal do Brasil)](https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/).
+Baixa, trata e carrega os [dados abertos de CNPJ da Receita Federal](https://arquivos.receitafederal.gov.br/dados/cnpj/dados_abertos_cnpj/)
+em um PostgreSQL.
 
-- **Alta Performance**: Download **assíncrono** (asyncio/curl_cffi) e carga via `COPY FROM STDIN`.
-- **Stealth & Resiliência**: Emulação de TLS de navegador (Chrome/Edge), rotação de proxies, retry inteligente e circuit breaker.
-- **Qualidade automática**: Quality gates por chunk (razão de nulos/alterações), quarantine de registros ruins em JSONL, e telemetria.
-- **Integridade referencial**: Backfill automático de registros pai ausentes e validação de FKs.
-- **Modular**: Execute etapas isoladas ou o pipeline completo.
+- **Rápido** — carga via `COPY FROM STDIN`, tabelas `UNLOGGED` durante a ingestão, processamento em chunks.
+- **Resiliente** — download assíncrono com `curl_cffi` (emulação de TLS), proxies, retry e circuit breaker.
+- **Auditável** — registros rejeitados vão para JSONL em `logs/quarantine/`, com telemetria por chunk.
 
-## Uso rápido
+## Requisitos
 
-```bash
-# Instalar dependências
-./tasks.ps1 install
+- Python 3.10+
+- PostgreSQL 14+ (o `constraints.sql` cria a extensão `pg_trgm`)
+- ~100 GB de disco
 
-# Verificação completa (lint + mypy + testes)
-./tasks.ps1 verify
-
-# Pipeline completo (baixa, extrai, consolida, carrega, constraints)
-./tasks.ps1 etl
-
-# Etapa individual
-./tasks.ps1 step download
-./tasks.ps1 step load
-
-# No Linux/macOS (sem PowerShell)
-python -m src --step download
-python -m src --step load
-```
-
-## Etapas do Pipeline
-
-| Etapa | Comando | Descrição |
-|---|---|---|
-| Verificar atualizações | `--step check` | Consulta a Receita Federal e detecta nova versão |
-| Download | `--step download` | Download assíncrono com curl_cffi (TLS fingerprint) |
-| Extração | `--step extract` | Descompactação dos arquivos ZIP |
-| Consolidação | `--step consolidate` | Agrupamento de CSVs parciais por tabela |
-| Carga | `--step load` | Carga via `COPY FROM STDIN`, quality gates, quarantine |
-| Constraints | `--step constraints` | PKs, FKs, índices, backfill de registros ausentes |
-
-Execute o pipeline completo com `--force` (ignora histórico, executa tudo):
+## Começando
 
 ```bash
-python -m src --force
+cp .env.example .env          # ajuste as credenciais do banco
+pip install -r requirements.txt -r requirements-dev.txt
+
+docker compose up -d db       # opcional: sobe o PostgreSQL
+python -m src --force         # pipeline completo
 ```
 
-Retome de onde parou com `--resume` (pula etapas já completadas):
+## CLI
 
 ```bash
-python -m src --resume
+python -m src [opções]
+
+  --force                  ignora o histórico e roda todas as etapas
+  --resume                 pula etapas já concluídas
+  --dry-run                mostra o que seria executado
+  --step {check,download,extract,consolidate,load,constraints}
+  --only / --exclude       restringem as tabelas do passo load
+  --run-queries            executa as queries de queries/ após a carga
+  --max-workers N          sobrescreve MAX_WORKERS
+  --rate-limit-per-sec N   sobrescreve RATE_LIMIT_PER_SEC
+  --skip-zip-verify        pulsa a verificação de integridade dos ZIPs
 ```
 
-Carregue apenas tabelas específicas:
+Etapas também rodam isoladas: `python -m src.downloader`, `python -m src.database_loader`, etc.
 
-```bash
-python -m src --step load --only empresas estabelecimentos
-python -m src --step load --exclude socios simples
+No Windows, `tasks.ps1` embrulha os comandos comuns:
+
+```powershell
+./tasks.ps1 install     ./tasks.ps1 lint      ./tasks.ps1 test
+./tasks.ps1 etl         ./tasks.ps1 step load ./tasks.ps1 verify
 ```
 
-## Integridade dos Dados
+## Como funciona
 
-A base da Receita Federal pode conter inconsistências referenciais (ex.: FK sem registro pai). O pipeline trata isso automaticamente:
+| Etapa | O que faz |
+|---|---|
+| `check` | Descobre a pasta `YYYY-MM` mais recente na Receita |
+| `download` | Baixa os ZIPs em paralelo, com resume por header `Range` |
+| `extract` | Descompacta cada ZIP |
+| `consolidate` | Concatena os volumes em um CSV por tabela |
+| `load` | Valida, aplica quality gates e carrega via `COPY` |
+| `constraints` | PKs, FKs, índices e backfill de registros ausentes |
 
-1. **Quality gates por chunk**: se a razão de valores alterados ou nulos excede o limiar configurado, o chunk é quarantinado eulogiado em JSONL.
-2. **Backfill automático**: registros pai ausentes são inseridos como `"NÃO CONSTA NA ORIGEM"` antes das FKs.
-3. **Validação de FKs**: registros com FK inválida são quarantineados.
-4. **Constraints ao final**: PKs, FKs e índices são aplicados por `src/constraints.sql` após a carga.
+A base da Receita tem lacunas referenciais. O pipeline trata isso em duas frentes:
+`constraints.sql` insere registros pai ausentes como `NAO CONSTA NA ORIGEM` antes de criar as FKs, e
+o passo `load` coloca em quarentena as linhas com FK inválida em `logs/quarantine/`.
 
-Registros quarantineados ficam em `quarantine/YYYYMMDD/*.jsonl` para auditoria.
-
-## Pré-requisitos
-
-- `Python` 3.10+
-- `PostgreSQL` 14+ (via Docker Compose ou local)
-- `Docker` (opcional, para o banco)
-- Espaço em disco: ~100 GB
+Se um chunk ultrapassar os limiares de qualidade (`ENABLE_QUALITY_GATES`), ele é registrado em
+`logs/telemetry/` e não é carregado.
 
 ## Configuração
 
-Copie `.env.example` para `.env` e ajuste:
+Tudo via `.env` — ver [`.env.example`](.env.example) e a lista completa em `src/settings.py`.
 
-```ini
-# Banco
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_DB=cnpj
-POSTGRES_USER=cnpj
-POSTGRES_PASSWORD=cnpj
-
-# Download
-MAX_WORKERS=4
-DOWNLOAD_CHUNK_SIZE=8192
-VERIFY_ZIP_INTEGRITY=true
-IMPERSONATE=chrome110    # chrome, chrome110, edge99, safari15_3
-# PROXIES=["http://user:pass@host:port", ...]
-
-# Qualidade
-ENABLE_QUALITY_GATES=true
-GATE_MAX_CHANGED_RATIO=0.3
-GATE_MAX_NULL_DELTA_RATIO=0.3
-STRICT_FK_VALIDATION=false
-
-# Logging
-LOG_LEVEL=INFO
-```
-
-## Testes
+## Desenvolvimento
 
 ```bash
-pytest -q -m "not integration"          # unitários
-pytest -q -m integration                 # integração (requer PostgreSQL)
-./tasks.ps1 verify                       # lint + mypy + testes
-```
-
-## CI / Docker
-
-```bash
-docker compose up -d db    # iniciar PostgreSQL
-./tasks.ps1 ci             # executa lint + testes + docker build + integração
+ruff check . && mypy src && pytest -q
 ```
 
 ## Documentação
 
-- [docs/index.md](docs/index.md) — visão geral e notas de versão
-- [docs/auto-repair.md](docs/auto-repair.md) — lógica de normalização e quality gates
+- [docs/index.md](docs/index.md) — visão geral, configuração e troubleshooting
+- [docs/auto-repair.md](docs/auto-repair.md) — normalização e quality gates
 - [docs/boas-praticas-indices.md](docs/boas-praticas-indices.md) — índices e performance
+- [docs/docker.md](docs/docker.md) — imagem e Docker Compose
+- [docs/download.md](docs/download.md) — detalhes do downloader
+- [docs/descricao-dados.md](docs/descricao-dados.md) — layout dos dados da Receita
 
 ## Licença
 
-MIT — consulte [LICENSE](LICENSE).
+MIT — [LICENSE](LICENSE)

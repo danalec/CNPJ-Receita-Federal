@@ -1,7 +1,8 @@
 import logging
 from pathlib import Path
 from typing import List, cast
-from src.settings import settings
+
+from .settings import settings
 
 __all__ = [
     "get_subdirectories",
@@ -96,7 +97,6 @@ def run_consolidation(delete_sources: bool = False):
     Função principal que orquestra todo o processo de concatenação.
     """
     logger.info("Iniciando processo de consolidação de dados...")
-    from src.settings import settings
 
     extracted_dir = cast(Path, settings.extracted_dir)
 
@@ -111,3 +111,10 @@ def run_consolidation(delete_sources: bool = False):
         concatenate_files_in_directory(subdir, delete_sources=delete_sources)
 
     logger.info("Processo de consolidação finalizado.")
+
+
+if __name__ == "__main__":
+    from .settings import setup_logging
+
+    setup_logging()
+    run_consolidation()

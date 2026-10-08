@@ -114,7 +114,7 @@ def test_fk_subset_quarantine_counts(tmp_path, monkeypatch):
     assert (("pais_codigo",) in labels) and (("municipio_codigo",) in labels)
 
 
-def test_critical_fields_quarantine(tmp_path, monkeypatch):
+def test_critical_fields_quarantine(tmp_path, monkeypatch, empty_domain_tables):
     # cnpj_basico critical nulls should be quarantined
     _make_csv(tmp_path, "empresas", "empresas.csv", "cnpj_basico;razao_social\n;X\n")
     rec = _Recorder()
@@ -126,7 +126,7 @@ def test_critical_fields_quarantine(tmp_path, monkeypatch):
     assert any(r.get("reason") == "critical_fields_null" for _, _, r in rec.calls)
 
 
-def test_invalid_cnpj_masks_skip_and_quarantine(tmp_path, monkeypatch):
+def test_invalid_cnpj_masks_skip_and_quarantine(tmp_path, monkeypatch, empty_domain_tables):
     _make_csv(tmp_path, "estabelecimentos", "estabelecimentos.csv", "cnpj_basico;cnpj_ordem;cnpj_dv\n12345678;0001;00\n87654321;0002;11\n")
     rec = _Recorder()
     monkeypatch.setattr(dl, "_write_jsonl", rec)
@@ -144,7 +144,7 @@ def test_invalid_cnpj_masks_skip_and_quarantine(tmp_path, monkeypatch):
     assert any(r.get("reason") == "invalid_cnpj" for _, _, r in rec.calls)
 
 
-def test_prometheus_metrics_and_push(tmp_path, monkeypatch):
+def test_prometheus_metrics_and_push(tmp_path, monkeypatch, empty_domain_tables):
     _make_csv(tmp_path, "empresas", "empresas.csv", "a;b\n1;2\n")
     out_prom = Path(tmp_path) / "metrics.prom"
     settings.enable_quality_gates = False
@@ -170,7 +170,7 @@ def test_prometheus_metrics_and_push(tmp_path, monkeypatch):
     assert posted["n"] >= 1
 
 
-def test_otlp_summary_push(tmp_path, monkeypatch):
+def test_otlp_summary_push(tmp_path, monkeypatch, empty_domain_tables):
     _make_csv(tmp_path, "empresas", "empresas.csv", "a;b\n1;2\n")
     settings.enable_otlp_push = True
     settings.otlp_endpoint = "http://otel.local"
