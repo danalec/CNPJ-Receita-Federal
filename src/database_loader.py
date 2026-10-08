@@ -701,24 +701,19 @@ def execute_sql_file(conn, filename):
             except Exception:
                 pass
         needs_autocommit = ("CONCURRENTLY" in sql_content) or (filename == "constraints.sql")
-        
-        # Set configuration for constraints backfill if needed
-        if filename == "constraints.sql":
-             with conn.cursor() as cursor:
-                enable_bf = '1' if getattr(settings, 'enable_constraints_backfill', True) else '0'
-                # If we are in autocommit mode, this SET might only apply to the current session/transaction?
-                # In autocommit, SET persists for the session.
-                # In transaction, it persists for the transaction.
-                cursor.execute(f"SET app.enable_backfill = '{enable_bf}'")
 
         if needs_autocommit:
             old_autocommit = conn.autocommit
             try:
                 conn.autocommit = True
+                if filename == "constraints.sql":
+                    with conn.cursor() as cursor:
+                        enable_bf = '1' if getattr(settings, 'enable_constraints_backfill', True) else '0'
+                        cursor.execute(f"SET app.enable_backfill = '{enable_bf}'")
                 # For CONCURRENTLY or VACUUM, we must execute statements individually
                 # Simple split by ';' (this is still fragile for complex SQL but sufficient for maintenance scripts)
                 statements = [s.strip() for s in sql_content.split(";") if s.strip()]
-                
+
                 with conn.cursor() as cursor:
                     cursor.execute("SET search_path TO rfb;")
                 

@@ -133,7 +133,9 @@ class AsyncDownloader:
             zip_links = []
             for a in soup.find_all("a"):
                 href = a.get("href")
-                if href and href.lower().endswith(".zip"):
+                if not isinstance(href, str):
+                    continue
+                if href.lower().endswith(".zip"):
                     if href.startswith("http"):
                         zip_links.append(href)
                     else:
@@ -228,7 +230,7 @@ class AsyncDownloader:
                         position=pbar_pos
                     )
                     
-                    async with aiofiles.open(dest_path, mode) as f:  # type: ignore
+                    async with aiofiles.open(dest_path, mode) as f:  # type: ignore[call-overload]
                         async for chunk in response.aiter_content(chunk_size=settings.download_chunk_size):
                             if not chunk:
                                 break

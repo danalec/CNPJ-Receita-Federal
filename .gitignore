@@ -2,6 +2,9 @@
 data
 logs
 
+### Agent / IDE tooling ###
+.qwen/
+
 # Python cache
 /.venv/
 /.venv310/

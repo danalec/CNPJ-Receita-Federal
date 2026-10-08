@@ -30,6 +30,8 @@ def get_latest_remote_date() -> Optional[str]:
 
         for link in links:
             href = link.get("href")
+            if not isinstance(href, str):
+                continue
             match = date_pattern.match(href)
             if match:
                 dates.append(match.group(1))
