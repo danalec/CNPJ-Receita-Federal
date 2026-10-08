@@ -58,6 +58,14 @@ class AsyncDownloader:
         self.rate_limit = settings.rate_limit_per_sec
         if self.rate_limit > 0:
             self.bucket_capacity = float(max(self.rate_limit, settings.download_chunk_size))
+            if self.rate_limit < settings.download_chunk_size:
+                logger.warning(
+                    f"RATE_LIMIT_PER_SEC={self.rate_limit} é o limite em BYTES por segundo, "
+                    f"e é menor que DOWNLOAD_CHUNK_SIZE={settings.download_chunk_size}. "
+                    f"Isso dá ~{self.rate_limit / 1024:.2f} KiB/s, o suficiente para levar "
+                    f"horas em um único arquivo. Se a intenção era 'req/s', use um valor "
+                    f"acima de {settings.download_chunk_size}."
+                )
         else:
             self.bucket_capacity = float("inf")
         self.tokens = self.bucket_capacity

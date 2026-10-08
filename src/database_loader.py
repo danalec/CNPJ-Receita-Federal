@@ -396,6 +396,15 @@ def _write_jsonl(kind: str, config_name: str, record: dict):
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def _chunk_records(chunk: pd.DataFrame):
+    """Row dicts safe for json.dumps (NaN/NA are not valid JSON)."""
+    try:
+        return chunk.where(pd.notna(chunk), None).to_dict(orient="records")
+    except Exception:
+        logger.exception("Falha ao serializar linhas para a quarentena; nada foi recuperável.")
+        return []
+
+
 def _write_json(path: Path, record: dict):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -439,6 +448,7 @@ def process_and_load_file(conn: Any, config_name: str) -> None:
     changed_totals: Dict[str, int] = {}
     null_delta_totals: Dict[str, int] = {}
     quality_gate_chunks = 0
+    quality_gate_rows = 0
     invalid_cnpj_rows = 0
     chunks_processed = 0
     class ColumnStats(TypedDict):
@@ -486,6 +496,7 @@ def process_and_load_file(conn: Any, config_name: str) -> None:
                     else:
                         triggers[c] = {"type": "null_delta", "ratio": ratio, "delta": int(d)}
             if triggers:
+                now = datetime.now(timezone.utc).isoformat()
                 telemetry_record["quality_gate"] = {"trigger_columns": triggers, "rows": rows_count}
                 _write_jsonl("telemetry", config_name, telemetry_record)
                 _write_jsonl(
@@ -498,11 +509,33 @@ def process_and_load_file(conn: Any, config_name: str) -> None:
                         "reason": "quality_gate",
                         "trigger_columns": triggers,
                         "rows": rows_count,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": now,
                     },
                 )
+                # The chunk is dropped from the load, so the rows themselves have to
+                # be kept: an aggregate record alone is not enough to recover the
+                # data or to account for the gap.
+                for rec in _chunk_records(chunk):
+                    _write_jsonl(
+                        "quarantine",
+                        config_name,
+                        {
+                            "table": table_name,
+                            "config": config_name,
+                            "chunk": i + 1,
+                            "reason": "quality_gate",
+                            "row": rec,
+                            "timestamp": now,
+                        },
+                    )
                 quality_gate_chunks += 1
-                logger.log(gate_level, f"Chunk {i + 1}: quality gate triggered; skipping chunk.")
+                quality_gate_rows += rows_count
+                logger.log(
+                    gate_level,
+                    f"Chunk {i + 1}: quality gate descartou {rows_count} linhas "
+                    f"(colunas: {sorted(triggers)}). Recuperáveis em "
+                    f"{_jsonl_dir('quarantine')}.",
+                )
                 continue
         else:
             _write_jsonl("telemetry", config_name, telemetry_record)
@@ -633,6 +666,7 @@ def process_and_load_file(conn: Any, config_name: str) -> None:
         "rows_total": int(total_rows),
         "chunks_processed": int(chunks_processed),
         "quality_gate_chunks": int(quality_gate_chunks),
+        "quality_gate_rows_discarded": int(quality_gate_rows),
         "invalid_cnpj_rows_skipped": int(invalid_cnpj_rows),
         "changed_totals": changed_totals,
         "null_delta_totals": null_delta_totals,
@@ -668,6 +702,13 @@ def process_and_load_file(conn: Any, config_name: str) -> None:
             requests.post(str(getattr(settings, "otlp_endpoint")), json=summary, timeout=10)
         except Exception:
             pass
+    if quality_gate_rows:
+        logger.warning(
+            f"Tabela '{table_name}': {quality_gate_rows} linhas em "
+            f"{quality_gate_chunks} chunk(s) NÃO foram carregadas por quality gate. "
+            f"Estão em {_jsonl_dir('quarantine')} — reexecute com "
+            f"ENABLE_QUALITY_GATES=false para carregá-las."
+        )
     logger.info(f"--- Tabela '{table_name}' finalizada! ---")
 
 

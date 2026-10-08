@@ -84,6 +84,51 @@ def test_quality_gate_writes_telemetry_and_quarantine(tmp_path, monkeypatch):
     assert any((k == "quarantine" and r.get("reason") == "quality_gate") for k, _, r in rec.calls)
 
 
+def test_quality_gate_keeps_the_discarded_rows(tmp_path, monkeypatch, empty_domain_tables):
+    """A gated chunk is dropped from the load, so the rows must survive on disk.
+
+    Only an aggregate record was written, which made the data unrecoverable and
+    left the summary unable to account for the gap.
+    """
+    _make_csv(tmp_path, "empresas", "empresas.csv", "a;b\n1;2\n3;4\n")
+    rec = _Recorder()
+    monkeypatch.setattr(dl, "_write_jsonl", rec)
+    settings.gate_min_rows = 1
+    settings.gate_max_changed_ratio = 0.1
+    settings.gate_max_null_delta_ratio = 0.1
+
+    # header=None, so every line of the CSV is a data row.
+    rows = 3
+
+    def fake_validate(name, chunk):
+        n = int(len(chunk))
+        return chunk, {"changed_counts": {"a": n}, "null_deltas": {}}, {}
+
+    monkeypatch.setattr(dl, "schema_validate", fake_validate)
+    monkeypatch.setattr(dl, "sql", _FakeSQL())
+    conn = FakeConn()
+
+    loaded = []
+    monkeypatch.setattr(dl, "fast_load_chunk", lambda c, df, t: loaded.append(int(len(df))))
+    dl.process_and_load_file(conn, "empresas")
+
+    assert loaded == [], "a gated chunk must not reach the COPY"
+    assert rows
+
+    per_row = [r for _, _, r in rec.calls if "row" in r]
+    assert len(per_row) == rows, f"expected the discarded rows to be kept, got {len(per_row)}"
+    assert all(r["reason"] == "quality_gate" for r in per_row)
+
+    summary_files = list(dl._jsonl_dir("telemetry").glob("empresas_summary.json"))
+    assert summary_files
+    import json
+
+    summary = json.loads(summary_files[0].read_text(encoding="utf-8"))
+    assert summary["quality_gate_chunks"] == 1
+    assert summary["quality_gate_rows_discarded"] == rows
+    assert summary["rows_total"] == 0
+
+
 def test_fk_subset_quarantine_counts(tmp_path, monkeypatch):
     settings.project_root = Path(tmp_path)
     settings.create_dirs()

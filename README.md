@@ -82,9 +82,11 @@ como `NAO CONSTA NA ORIGEM` (`ENABLE_CONSTRAINTS_BACKFILL`). Ele cobre `paises`,
 carregada.
 
 Quality gates descartam um chunk inteiro quando a proporção de nulos novos ou de valores alterados
-passa dos limiares; o descarte vira um registro agregado em `logs/telemetry/<data>/`. Vale saber
-que o gate só é avaliado em chunks com pelo menos `GATE_MIN_ROWS` linhas, e que o critério de
-"valores alterados" só existe em `AUTO_REPAIR_LEVEL=aggressive`.
+passa dos limiares. As linhas descartadas **são gravadas em `logs/quarantine/<data>/`** com
+`reason: "quality_gate"`, então nada se perde: dá para recuperar ou reprocessar com
+`ENABLE_QUALITY_GATES=false`. Vale saber que o gate só é avaliado em chunks com pelo menos
+`GATE_MIN_ROWS` linhas, e que o critério de "valores alterados" só existe em
+`AUTO_REPAIR_LEVEL=aggressive`.
 
 ## Configuração
 

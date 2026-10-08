@@ -83,6 +83,39 @@ async def test_rate_limiter_bucket_can_always_pay_for_a_chunk():
 
 
 @pytest.mark.asyncio
+async def test_rate_limit_below_chunk_size_warns_about_the_unit(caplog):
+    """RATE_LIMIT_PER_SEC is bytes/second, which reads like requests/second.
+
+    Someone setting 1 to be polite to the Receita would end up at 1 B/s and
+    wait hours per file without any indication why.
+    """
+    settings.rate_limit_per_sec = 1
+    settings.download_chunk_size = 8192
+
+    with caplog.at_level("WARNING"):
+        AsyncDownloader()
+
+    assert any("BYTES" in r.message for r in caplog.records), (
+        f"expected a bytes-per-second warning, got {[r.message for r in caplog.records]}"
+    )
+
+    settings.rate_limit_per_sec = 0
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_above_chunk_size_does_not_warn(caplog):
+    settings.rate_limit_per_sec = 10 * 1024 * 1024
+    settings.download_chunk_size = 8192
+
+    with caplog.at_level("WARNING"):
+        AsyncDownloader()
+
+    assert not any("BYTES" in r.message for r in caplog.records)
+
+    settings.rate_limit_per_sec = 0
+
+
+@pytest.mark.asyncio
 async def test_download_file_success(tmp_path):
     # Create a valid zip file in memory
     bio = io.BytesIO()
